@@ -1,362 +1,660 @@
+let incidentData = [];
+let chartRegion = null;
+let chartVendor = null;
+let chartSla = null;
+let chartTrend = null;
+let currentAvailability = 100.0;
+let totalMachines = 848;
+let filterTimer = null;
 
-      let incidentData = [];
-      let chartRegion = null;
-      let chartSla = null;
-      let chartTrend = null;
-      let currentAvailability = 100.00; // Variabel global baru
+const REFRESH_MS = 60000; // refresh tiap 1 menit (hanya baca SQLite lokal)
+const STALE_AFTER_SECONDS = 900; // data dianggap basi jika sync > 15 menit lalu
 
-      window.onload = function () {
-        lucide.createIcons();
-        initClocks();
+window.onload = function () {
+  lucide.createIcons();
+  applySavedTheme();
+  initClocks();
+  initCharts();
+  fetchLiveIncidents();
+  setInterval(fetchLiveIncidents, REFRESH_MS);
+};
 
-        // Inisialisasi Canvas Chart lebih dulu
-        initCharts();
+/* ---------- Util ---------- */
 
-        // Tarik data API
-        fetchLiveIncidents();
+function esc(s) {
+  return String(s ?? "-").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+}
 
-        // Auto refresh setiap 2 menit (120000ms)
-        setInterval(fetchLiveIncidents, 300000);
-      };
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
 
-      function initClocks() {
-        setInterval(() => {
-          const now = new Date();
-          const hours = String(now.getHours()).padStart(2, "0");
-          const minutes = String(now.getMinutes()).padStart(2, "0");
-          const seconds = String(now.getSeconds()).padStart(2, "0");
-          document.getElementById("realtimeClock").innerText =
-            `${hours}:${minutes}:${seconds} WIB`;
-        }, 1000);
+/* ---------- Clock ---------- */
+
+function initClocks() {
+  const tick = () => {
+    const now = new Date();
+    document.getElementById("realtimeClock").innerText =
+      `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())} WIB`;
+  };
+  tick();
+  setInterval(tick, 1000);
+}
+
+/* ---------- Theme ---------- */
+
+function themeColors() {
+  const light = document.getElementById("appBody").classList.contains("light");
+  return {
+    tick: light ? "#475569" : "#94A3B8",
+    grid: light ? "#E2E8F0" : "#1E293B",
+    surface: light ? "#FFFFFF" : "#0A0F1D",
+  };
+}
+
+function applyChartTheme() {
+  const c = themeColors();
+  [chartRegion, chartTrend].forEach((ch) => {
+    if (!ch) return;
+    ch.options.scales.x.ticks.color = c.tick;
+    ch.options.scales.y.ticks.color = c.tick;
+    ch.options.scales.y.grid.color = c.grid;
+    if (ch.options.plugins.legend.labels)
+      ch.options.plugins.legend.labels.color = c.tick;
+    ch.update();
+  });
+  if (chartSla) {
+    chartSla.options.plugins.legend.labels.color = c.tick;
+    chartSla.data.datasets[0].borderColor = c.surface;
+    chartSla.update();
+  }
+  if (chartVendor) {
+    chartVendor.options.scales.x.ticks.color = c.tick;
+    chartVendor.options.scales.x.grid.color = c.grid;
+    chartVendor.options.scales.y.ticks.color = c.tick;
+    chartVendor.update();
+  }
+}
+
+function setTheme(isLight) {
+  const body = document.getElementById("appBody");
+  body.classList.toggle("light", isLight);
+  body.classList.toggle("dark", !isLight);
+  document.documentElement.classList.toggle("light", isLight); // <-- tambah ini
+  try {
+    localStorage.setItem("dashTheme", isLight ? "light" : "dark");
+  } catch (e) {
+    /* abaikan jika storage diblokir */
+  }
+}
+
+function applySavedTheme() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem("dashTheme");
+  } catch (e) {
+    /* abaikan */
+  }
+  if (saved === "light") setTheme(true);
+}
+
+function toggleTheme() {
+  const isLight = !document
+    .getElementById("appBody")
+    .classList.contains("light");
+  setTheme(isLight);
+  applyChartTheme();
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch((e) => console.log(e));
+  } else if (document.exitFullscreen) {
+    document.exitFullscreen();
+  }
+}
+
+/* ---------- Sync status ---------- */
+
+function setSyncStatus(text, color) {
+  const el = document.getElementById("syncStatusText");
+  el.innerText = text;
+  ["text-emerald-400", "text-amber-400", "text-red-400"].forEach((c) =>
+    el.classList.remove(c),
+  );
+  el.classList.add(color);
+}
+
+/* ---------- Fetch ---------- */
+
+async function fetchLiveIncidents() {
+  try {
+    const response = await fetch("/api/incidents");
+    const result = await response.json();
+
+    if (response.ok && Array.isArray(result.data)) {
+      incidentData = result.data;
+      currentAvailability =
+        typeof result.availability === "number" ? result.availability : 100.0;
+      totalMachines = result.total_machines ?? totalMachines;
+
+      document.getElementById("lastSyncTime").innerText =
+        result.synced_at || "-";
+
+      const age = result.sync_age_seconds;
+      if (result.message) {
+        setSyncStatus("DB BELUM TERISI", "text-amber-400");
+      } else if (age === null || age === undefined) {
+        setSyncStatus("MENUNGGU SYNC PERTAMA", "text-amber-400");
+      } else if (age > STALE_AFTER_SECONDS) {
+        setSyncStatus("DATA BASI (STALE)", "text-red-400");
+      } else {
+        setSyncStatus("CONNECTED (LIVE)", "text-emerald-400");
       }
 
-      async function fetchLiveIncidents() {
-        try {
-          const response = await fetch("/api/incidents");
-          const result = await response.json();
+      updateKPIs();
+      updateCharts();
+      renderIncidentTable();
+      renderPriorityTable();   // <-- tambah ini
+      fetchHistory();
+    } else {
+      setSyncStatus("SYNC ERROR", "text-red-400");
+    }
+  } catch (err) {
+    console.error("Gagal mengambil data live:", err);
+    setSyncStatus("DISCONNECTED", "text-red-400");
+  }
+}
 
-          if (response.ok && result.data) {
-            incidentData = result.data;
-            // Ambil data availability dari backend API
-            currentAvailability = result.availability !== undefined ? result.availability : 100.00;
+async function fetchHistory() {
+  try {
+    const response = await fetch("/api/history");
+    const h = await response.json();
+    if (response.ok && chartTrend) {
+      chartTrend.data.labels = h.labels || [];
+      chartTrend.data.datasets[0].data = h.normal || [];
+      chartTrend.data.datasets[1].data = h.warning || [];
+      chartTrend.data.datasets[2].data = h.critical || [];
+      chartTrend.update();
+    }
+  } catch (err) {
+    console.error("Gagal mengambil riwayat:", err);
+  }
+}
 
-            const now = new Date();
-            document.getElementById("lastSyncTime").innerText =
-              `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-            document.getElementById("syncStatusText").innerText =
-              "CONNECTED (LIVE)";
+/* ---------- Charts ---------- */
+const noDataPlugin = {
+  id: "noData",
+  afterDraw(chart) {
+    if (chart.data.datasets.some((d) => d.data.length > 0)) return;
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    ctx.fillStyle = "#94A3B8";
+    ctx.font = "12px JetBrains Mono, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(
+      "Belum ada data riwayat",
+      (chartArea.left + chartArea.right) / 2,
+      (chartArea.top + chartArea.bottom) / 2,
+    );
+    ctx.restore();
+  },
+};
+function initCharts() {
+  const c = themeColors();
 
-            updateKPIs();
-            updateCharts(); 
-            renderIncidentTable();
-          } else {
-            document.getElementById("syncStatusText").innerText = "SYNC ERROR";
-          }
-        } catch (err) {
-          console.error("Gagal mengambil data live:", err);
-          document.getElementById("syncStatusText").innerText = "DISCONNECTED";
-        }
-      }
+  const baseScales = {
+    x: { ticks: { color: c.tick, font: { size: 10 } }, grid: { display: false } },
+    y: {
+      beginAtZero: true,
+      ticks: { color: c.tick, font: { size: 10 }, precision: 0 },
+      grid: { color: c.grid },
+    },
+  };
 
-      function initCharts() {
-        const ctxRegion = document
-          .getElementById("chartRegionDistribution")
-          .getContext("2d");
-        chartRegion = new Chart(ctxRegion, {
-          type: "bar",
-          data: {
-            labels: [],
-            datasets: [
-              {
-                data: [],
-                backgroundColor: "rgba(56, 189, 248, 0.75)",
-                borderColor: "#38BDF8",
-                borderWidth: 1,
-                borderRadius: 6,
-              },
-            ],
+  chartRegion = new Chart(
+    document.getElementById("chartRegionDistribution").getContext("2d"),
+    {
+      type: "bar",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            data: [],
+            backgroundColor: "rgba(56, 189, 248, 0.75)",
+            borderColor: "#38BDF8",
+            borderWidth: 1,
+            borderRadius: 6,
           },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: {
-                ticks: { color: "#94A3B8", font: { size: 10 } },
-                grid: { display: false },
-              },
-              y: {
-                ticks: { color: "#94A3B8", font: { size: 10 } },
-                grid: { color: "#1E293B" },
-              },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+                scales: (() => {
+          const s = JSON.parse(JSON.stringify(baseScales));
+          s.x.ticks.autoSkip = true;
+          s.x.ticks.maxTicksLimit = 8;
+          return s;
+        })(),
+      },
+    },
+  );
+
+    chartVendor = new Chart(
+    document.getElementById("chartVendorDistribution").getContext("2d"),
+    {
+      type: "bar",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            data: [],
+            backgroundColor: "rgba(129, 140, 248, 0.75)",
+            borderColor: "#818CF8",
+            borderWidth: 1,
+            borderRadius: 6,
+          },
+        ],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { color: c.tick, font: { size: 10 }, precision: 0 },
+            grid: { color: c.grid },
+          },
+          y: {
+            ticks: { color: c.tick, font: { size: 10 }, autoSkip: false },
+            grid: { display: false },
+          },
+        },
+      },
+    },
+  );
+
+  chartSla = new Chart(
+    document.getElementById("chartSlaMatrix").getContext("2d"),
+    {
+      type: "doughnut",
+      data: {
+        labels: ["<= 30 Menit", "30 Menit - 1 Jam", "> 1 Jam"],
+        datasets: [
+          {
+            data: [0, 0, 0],
+            backgroundColor: ["#10B981", "#F59E0B", "#EF4444"],
+            borderWidth: 2,
+            borderColor: c.surface,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: {
+              color: c.tick,
+              font: { size: 10, family: "JetBrains Mono" },
             },
           },
-        });
+        },
+        cutout: "68%",
+      },
+    },
+  );
 
-        const ctxSla = document
-          .getElementById("chartSlaMatrix")
-          .getContext("2d");
-        chartSla = new Chart(ctxSla, {
-          type: "doughnut",
-          data: {
-            labels: ["< 1H Normal", "1-4H Warning", "> 6H Critical"],
-            datasets: [
-              {
-                data: [0, 0, 0],
-                backgroundColor: ["#10B981", "#F59E0B", "#EF4444"],
-                borderWidth: 2,
-                borderColor: "#0A0F1D",
-              },
-            ],
+  chartTrend = new Chart(
+    document.getElementById("chartTimelineTrend").getContext("2d"),
+    {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "≤ 30 Menit",
+            data: [],
+            borderColor: "#10B981",
+            backgroundColor: "rgba(16, 185, 129, 0.08)",
+            fill: false,
+            tension: 0.4,
+            pointRadius: 2,
           },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                position: "bottom",
-                labels: {
-                  color: "#94A3B8",
-                  font: { size: 10, family: "JetBrains Mono" },
-                },
-              },
-            },
-            cutout: "68%",
+          {
+            label: "30 Menit - 1 Jam",
+            data: [],
+            borderColor: "#F97316",
+            backgroundColor: "rgba(249, 115, 22, 0.08)",
+            fill: false,
+            tension: 0.4,
+            pointRadius: 2,
           },
-        });
-
-        const ctxTrend = document
-          .getElementById("chartTimelineTrend")
-          .getContext("2d");
-        chartTrend = new Chart(ctxTrend, {
-          type: "line",
-          data: {
-            labels: [
-              "00:00",
-              "04:00",
-              "08:00",
-              "12:00",
-              "16:00",
-              "20:00",
-              "NOW",
-            ],
-            datasets: [
-              {
-                label: "Active Alarms",
-                data: [0, 0, 0, 0, 0, 0, 0],
-                borderColor: "#10B981",
-                backgroundColor: "rgba(16, 185, 129, 0.12)",
-                fill: true,
-                tension: 0.4,
-                pointRadius: 4,
-              },
-            ],
+          {
+            label: "> 1 Jam",
+            data: [],
+            borderColor: "#EF4444",
+            backgroundColor: "rgba(239, 68, 68, 0.08)",
+            fill: false,
+            tension: 0.4,
+            pointRadius: 2,
           },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: {
-                ticks: { color: "#94A3B8", font: { size: 10 } },
-                grid: { display: false },
-              },
-              y: {
-                ticks: { color: "#94A3B8", font: { size: 10 } },
-                grid: { color: "#1E293B" },
-              },
+        ],
+      },
+      options: {
+        plugins: [noDataPlugin],
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: "bottom",
+            labels: {
+              color: c.tick,
+              boxWidth: 10,
+              font: { size: 10, family: "JetBrains Mono" },
             },
           },
-        });
-      }
+        },
+        scales: JSON.parse(JSON.stringify(baseScales)),
+      },
+    },
+  );
+}
 
-      function updateCharts() {
-        if (!chartSla || !chartRegion || !chartTrend) return;
+function updateCharts() {
+  if (!chartSla || !chartRegion) return;
 
-        // Hitung berdasarkan status dari Flask (i.Status)
-        const criticalCount = incidentData.filter(
-          (i) => i.Status === "CRITICAL",
-        ).length;
-        const warningCount = incidentData.filter(
-          (i) => i.Status === "WARNING",
-        ).length;
-        const normalCount = incidentData.filter(
-          (i) => i.Status === "NORMAL",
-        ).length;
+  const count = (s) => incidentData.filter((i) => i.Status === s).length;
+  chartSla.data.datasets[0].data = [
+    count("NORMAL"),
+    count("WARNING"),
+    count("CRITICAL"),
+  ];
+  chartSla.update();
 
-        // 1. Update Donut SLA Matrix
-        chartSla.data.datasets[0].data = [
-          normalCount,
-          warningCount,
-          criticalCount,
-        ];
-        chartSla.update();
+  const areaCounts = {};
+  incidentData.forEach((i) => {
+    const name = i.Area || "Unknown";
+    areaCounts[name] = (areaCounts[name] || 0) + 1;
+  });
+    const sorted = Object.entries(areaCounts).sort(
+    (a, b) => a[1] - b[1] || a[0].localeCompare(b[0]),
+  );
+  chartRegion.data.labels = sorted.map((e) => e[0]);
+  chartRegion.data.datasets[0].data = sorted.map((e) => e[1]);
+  chartRegion.update();
 
-        // 2. Update Bar Region
-        const areaCounts = {};
-        incidentData.forEach((i) => {
-          const areaName = i.Area || "Unknown";
-          areaCounts[areaName] = (areaCounts[areaName] || 0) + 1;
-        });
+    // Distribusi per vendor FLM (semua vendor, terbanyak di atas)
+  if (chartVendor) {
+    const vendorCounts = {};
+    incidentData.forEach((i) => {
+      const name = String(i.FLMVENDOR ?? "").trim() || "Unknown";
+      vendorCounts[name] = (vendorCounts[name] || 0) + 1;
+    });
+        const vSorted = Object.entries(vendorCounts).sort(
+      (a, b) => a[1] - b[1] || a[0].localeCompare(b[0]),
+    );
 
-        chartRegion.data.labels = Object.keys(areaCounts);
-        chartRegion.data.datasets[0].data = Object.values(areaCounts);
-        chartRegion.update();
+    // Tinggi menyesuaikan jumlah vendor (minimal 256px, 28px per vendor)
+    document.getElementById("vendorChartWrap").style.height =
+      Math.max(256, vSorted.length * 28) + "px";
 
-        // 3. Update Line Timeline Trend
-        chartTrend.data.datasets[0].data = [
-          5,
-          8,
-          12,
-          19,
-          21,
-          24,
-          incidentData.length,
-        ];
-        chartTrend.update();
-      }
+    chartVendor.data.labels = vSorted.map((e) => e[0]);
+    chartVendor.data.datasets[0].data = vSorted.map((e) => e[1]);
+    chartVendor.resize();
+    chartVendor.update();
+  }
+}
 
-      function renderIncidentTable() {
-        const tbody = document.getElementById("incidentTableBody");
-        const searchVal = document
-          .getElementById("searchInput")
-          .value.toLowerCase();
-        const slaVal = document.getElementById("slaFilter").value;
+/* ---------- Table ---------- */
 
-        tbody.innerHTML = "";
+function getFilteredIncidents() {
+  const searchVal = document.getElementById("searchInput").value.toLowerCase();
+  const slaVal = document.getElementById("slaFilter").value;
 
-        let filtered = incidentData.filter((item) => {
-          const matchesSearch =
-            String(item.IncidentId || "")
-              .toLowerCase()
-              .includes(searchVal) ||
-            String(item.ObjectId || "")
-              .toLowerCase()
-              .includes(searchVal) ||
-            String(item.SourceProblemName || "")
-              .toLowerCase()
-              .includes(searchVal);
-          const matchesSla = slaVal === "ALL" || item.Status === slaVal;
-          return matchesSearch && matchesSla;
-        });
+  const filtered = incidentData.filter((item) => {
+    const haystack = [item.IncidentId, item.ObjectId, item.SourceProblemName]
+      .map((v) => String(v ?? "").toLowerCase())
+      .join(" ");
+    const matchesSearch = haystack.includes(searchVal);
+    const matchesSla = slaVal === "ALL" || item.Status === slaVal;
+    return matchesSearch && matchesSla;
+  });
 
-        document.getElementById("incidentCountBadge").innerText =
-          `${filtered.length} Active`;
+  // Urutkan: aging terlama di atas
+  filtered.sort((a, b) => {
+    const ma = (a.AgeHours || 0) * 60 + (a.AgeMinutes || 0);
+    const mb = (b.AgeHours || 0) * 60 + (b.AgeMinutes || 0);
+    return mb - ma;
+  });
+  return filtered;
+}
 
-        if (filtered.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">Tidak ada insiden yang cocok dengan filter.</td></tr>`;
-          return;
-        }
+// Daftar area prioritas. Ubah/tambah nama area di sini jika perlu.
+const PRIORITY_AREAS = ["113 / Palembang Arief", "112 / Palembang Sudirman"];
 
-        filtered.forEach((item) => {
-          const tr = document.createElement("tr");
-          const isCritical = item.Status === "CRITICAL";
+// Normalisasi: huruf kecil, tanda baca/spasi ganda diratakan,
+// jadi "PALEMBANG  ARIEF" atau "Palembang-Arief" tetap cocok.
+function normArea(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
 
-          tr.className = isCritical
-            ? "bg-red-950/30 border-l-4 border-l-red-500 hover:bg-red-900/40 transition duration-150"
-            : "hover:bg-slate-800/40 transition duration-150";
+// Cocokkan nama area prioritas terhadap kolom Area + KANWIL (kata utuh)
+function isPriorityArea(item, name) {
+  const hay = " " + normArea(`${item.Area ?? ""} ${item.KANWIL ?? ""}`) + " ";
+  return hay.includes(" " + normArea(name) + " ");
+}
 
-          const slaBadge = isCritical
-            ? `<span class="px-2 py-0.5 text-[10px] bg-red-600 text-white font-black rounded animate-pulse">&gt;4H SLA BREACH</span>`
-            : item.Status === "WARNING"
-              ? `<span class="px-2 py-0.5 text-[10px] bg-amber-500/20 text-amber-300 rounded border border-amber-500/40">1H - 4H WARNING</span>`
-              : `<span class="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/40">&lt;1H NORMAL</span>`;
+function slaBadgeHtml(status) {
+  if (status === "CRITICAL")
+    return `<span class="px-2 py-0.5 text-[10px] bg-red-600 text-white font-black rounded animate-pulse">&gt;1 JAM</span>`;
+  if (status === "WARNING")
+    return `<span class="px-2 py-0.5 text-[10px] bg-orange-500/20 text-orange-300 rounded border border-orange-500/40">30 MNT - 1 JAM</span>`;
+  return `<span class="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/40">&le;30 MNT</span>`;
+}
 
-          tr.innerHTML = `
-          <td class="py-3 px-4 font-bold text-sky-400">#${item.IncidentId || "-"}</td>
-          <td class="py-3 px-4 text-slate-200 font-semibold">${item.ObjectId || "-"}</td>
-          <td class="py-3 px-4 text-slate-300">${item.Area || "-"} / ${item.KANWIL || "-"}</td>
-          <td class="py-3 px-4 text-amber-300">${item.SourceProblemName || "-"}</td>
-          <td class="py-3 px-4 text-slate-300">${item.FLMVENDOR || "-"}</td>
-          <td class="py-3 px-4 text-slate-200 font-mono">${item.AgingStr || "00d 00h 00m"}</td>
-          <td class="py-3 px-4">${slaBadge}</td>
-        `;
-          tbody.appendChild(tr);
-        });
-      }
+function renderPriorityTable() {
+  const tbody = document.getElementById("priorityTableBody");
+  if (!tbody) return;
 
-      function filterIncidents() {
-        renderIncidentTable();
-      }
+    const items = incidentData.filter((i) =>
+    PRIORITY_AREAS.some((name) => isPriorityArea(i, name)),
+  );
 
-      let globalAvailability = 99.00; // Default
+  // Aging terlama di atas
+  items.sort((a, b) => {
+    const ma = (a.AgeHours || 0) * 60 + (a.AgeMinutes || 0);
+    const mb = (b.AgeHours || 0) * 60 + (b.AgeMinutes || 0);
+    return mb - ma;
+  });
 
-      // Di dalam fungsi fetchLiveIncidents(), tangkap availability:
-      // if (response.ok && result.data) {
-      //    incidentData = result.data;
-      //    globalAvailability = result.availability || 100;
-      //    ...
-      // }
+  document.getElementById("priorityCountBadge").innerText =
+    `${items.length} Active`;
 
-      function updateKPIs() {
-        const total = incidentData.length;
-        const criticalBreaches = incidentData.filter(
-          (i) => i.Status === "CRITICAL",
-        ).length;
-        const uniqueAreas = new Set(incidentData.map((i) => i.Area)).size;
+  // Ringkasan per area
+  document.getElementById("priorityAreaSummary").innerHTML = PRIORITY_AREAS.map(
+    (name) => {
+      const list = items.filter((i) => isPriorityArea(i, name));
+      const red = list.filter((i) => i.Status === "CRITICAL").length;
+      const cls =
+        red > 0
+          ? "border-red-500/60 text-red-400"
+          : list.length > 0
+            ? "border-orange-500/40 text-orange-300"
+            : "border-emerald-500/40 text-emerald-400";
+      return `<span class="px-3 py-1 rounded-lg border ${cls} text-xs font-mono">${esc(name)}: <b>${list.length}</b> insiden${red > 0 ? ` (${red} &gt;1 jam)` : ""}</span>`;
+    },
+  ).join("");
 
-        document.getElementById("kpiTotalIncidents").innerText = total;
-        document.getElementById("kpiImpactedAreas").innerText = uniqueAreas;
-        document.getElementById("kpiImpactedMachines").innerText = total;
-        document.getElementById("kpiCriticalBreaches").innerText = criticalBreaches;
+  // Bingkai panel berkedip jika ada tiket merah
+  const hasRed = items.some((i) => i.Status === "CRITICAL");
+  document
+    .getElementById("priorityPanel")
+    .classList.toggle("animate-glow-red", hasRed);
 
-        // Render nilai total problem secara dinamis di kartu availability
-        const probSubElement = document.getElementById("kpiProblemSub");
-        if (probSubElement) {
-            probSubElement.innerText = total;
-        }
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-emerald-400">Semua area prioritas aman, tidak ada insiden aktif.</td></tr>`;
+    return;
+  }
 
-        // Render Availability & Cek Target 99%
-        const availElement = document.getElementById("kpiAvailability");
-        if (availElement) {
-            availElement.innerText = `${currentAvailability}%`;
-            
-            // Jika availability di bawah target 99%, beri peringatan warna merah
-            if (currentAvailability < 99.00) {
-                availElement.className = "text-red-400 font-black animate-pulse";
-            } else {
-                availElement.className = "text-emerald-400 font-black";
-            }
-        }
+  const frag = document.createDocumentFragment();
+  items.forEach((item, index) => {
+    const tr = document.createElement("tr");
+    tr.className =
+      item.Status === "CRITICAL"
+        ? "bg-red-950/30 border-l-4 border-l-red-500 hover:bg-red-900/40 transition duration-150"
+        : "hover:bg-slate-800/40 transition duration-150";
+    tr.innerHTML = `
+      <td class="py-3 px-4 font-bold text-sky-400 text-center">${index + 1}</td>
+      <td class="py-3 px-4 text-slate-200 font-semibold">${esc(item.ObjectId)}</td>
+      <td class="py-3 px-4 text-slate-300">${esc(item.Area)}</td>
+      <td class="py-3 px-4 text-amber-300">${esc(item.SourceProblemName)}</td>
+      <td class="py-3 px-4 text-slate-300">${esc(item.FLMVENDOR)}</td>
+      <td class="py-3 px-4 text-slate-200 font-mono">${esc(item.AgingStr || "00d 00h 00m")}</td>
+      <td class="py-3 px-4">${slaBadgeHtml(item.Status)}</td>
+    `;
+    frag.appendChild(tr);
+  });
+  tbody.innerHTML = "";
+  tbody.appendChild(frag);
+}
 
-        const card = document.getElementById("criticalSlaCard");
-        if (criticalBreaches > 0) {
-          card.classList.add("animate-glow-red");
-        } else {
-          card.classList.remove("animate-glow-red");
-        }
-      }
+function renderIncidentTable() {
+  const tbody = document.getElementById("incidentTableBody");
+  const filtered = getFilteredIncidents();
 
-      function toggleTheme() {
-        const body = document.getElementById("appBody");
-        body.classList.toggle("dark");
-        body.classList.toggle("light");
-      }
+  tbody.innerHTML = "";
+  document.getElementById("incidentCountBadge").innerText =
+    `${filtered.length} Active`;
 
-      function toggleFullscreen() {
-        if (!document.fullscreenElement) {
-          document.documentElement
-            .requestFullscreen()
-            .catch((e) => console.log(e));
-        } else {
-          if (document.exitFullscreen) document.exitFullscreen();
-        }
-      }
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">Tidak ada insiden yang cocok dengan filter.</td></tr>`;
+    return;
+  }
 
-      function exportToCSV() {
-        let csvContent =
-          "data:text/csv;charset=utf-8,Incident ID,Terminal ID,Area,Problem,Aging,Status\n";
-        incidentData.forEach((i) => {
-          csvContent += `${i.IncidentId},${i.ObjectId},${i.Area},"${i.SourceProblemName}",${i.AgingStr},${i.Status}\n`;
-        });
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute(
-          "download",
-          `IMS_Incidents_${new Date().toISOString().slice(0, 10)}.csv`,
-        );
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
+  const frag = document.createDocumentFragment();
+
+  filtered.forEach((item, index) => {
+    const tr = document.createElement("tr");
+    const isCritical = item.Status === "CRITICAL";
+
+    tr.className = isCritical
+      ? "bg-red-950/30 border-l-4 border-l-red-500 hover:bg-red-900/40 transition duration-150"
+      : "hover:bg-slate-800/40 transition duration-150";
+
+    const slaBadge = isCritical
+      ? `<span class="px-2 py-0.5 text-[10px] bg-red-600 text-white font-black rounded animate-pulse">Critical</span>`
+      : item.Status === "WARNING"
+        ? `<span class="px-2 py-0.5 text-[10px] bg-orange-500/20 text-orange-300 rounded border border-orange-500/40">Warning</span>`
+        : `<span class="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/40">Normal</span>`;
+
+    tr.innerHTML = `
+      <td class="py-3 px-4 font-bold text-sky-400 text-center">${index + 1}</td>
+      <td class="py-3 px-4 text-slate-200 font-semibold">${esc(item.ObjectId)}</td>
+      <td class="py-3 px-4 text-slate-300">${esc(item.Area)}</td>
+      <td class="py-3 px-4 text-amber-300">${esc(item.SourceProblemName)}</td>
+      <td class="py-3 px-4 text-slate-300">${esc(item.FLMVENDOR)}</td>
+      <td class="py-3 px-4 text-slate-200 font-mono">${esc(item.AgingStr || "00d 00h 00m")}</td>
+      <td class="py-3 px-4">${slaBadge}</td>
+    `;
+    frag.appendChild(tr);
+  });
+
+  tbody.appendChild(frag);
+}
+
+function filterIncidents() {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(renderIncidentTable, 200);
+}
+
+/* ---------- KPI ---------- */
+
+function updateKPIs() {
+  const total = incidentData.length;
+  const criticalBreaches = incidentData.filter(
+    (i) => i.Status === "CRITICAL",
+  ).length;
+  const uniqueAreas = new Set(
+    incidentData.map((i) => i.Area).filter((a) => a),
+  ).size;
+
+  // Rata-rata aging (menit -> "Xh Ym")
+  let avgText = "0h 0m";
+  if (total > 0) {
+    const sumMinutes = incidentData.reduce(
+      (acc, i) => acc + (i.AgeHours || 0) * 60 + (i.AgeMinutes || 0),
+      0,
+    );
+    const avg = Math.round(sumMinutes / total);
+    avgText = `${Math.floor(avg / 60)}h ${avg % 60}m`;
+  }
+
+  document.getElementById("kpiTotalIncidents").innerText = total;
+  document.getElementById("kpiImpactedAreas").innerText = uniqueAreas;
+  document.getElementById("kpiAvgAging").innerText = avgText;
+  document.getElementById("kpiCriticalBreaches").innerText = criticalBreaches;
+  document.getElementById("kpiProblemSub").innerText = total;
+  document.getElementById("kpiTotalMachines").innerText = totalMachines;
+
+  // Availability: ganti hanya warna/animasi, jangan timpa class ukuran font
+  const availElement = document.getElementById("kpiAvailability");
+  availElement.innerText = `${Number(currentAvailability).toFixed(2)}%`;
+  const below = currentAvailability < 99.0;
+  availElement.classList.toggle("text-red-400", below);
+  availElement.classList.toggle("animate-pulse", below);
+  availElement.classList.toggle("text-emerald-400", !below);
+
+  const card = document.getElementById("criticalSlaCard");
+  card.classList.toggle("animate-glow-red", criticalBreaches > 0);
+}
+
+/* ---------- Export ---------- */
+
+function exportToCSV() {
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const rows = [
+    ["Incident ID", "Terminal ID", "Area", "Problem", "Vendor FLM", "Aging", "Status"],
+  ];
+  // Mengekspor sesuai filter & urutan yang sedang tampil di tabel
+  getFilteredIncidents().forEach((i) =>
+    rows.push([
+      i.IncidentId,
+      i.ObjectId,
+      i.Area,
+      i.KANWIL,
+      i.SourceProblemName,
+      i.FLMVENDOR,
+      i.AgingStr,
+      i.Status,
+    ]),
+  );
+
+  const csv = "\uFEFF" + rows.map((r) => r.map(q).join(",")).join("\n");
+  const url = URL.createObjectURL(
+    new Blob([csv], { type: "text/csv;charset=utf-8;" }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `IMS_Incidents_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

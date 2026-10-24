@@ -1,0 +1,88 @@
+:root {
+  color-scheme: dark;
+  --page: 10 15 29;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+  --sky-300: 125 211 252;
+  --sky-400: 56 189 248;
+  --sky-800: 7 89 133;
+  --sky-950: 8 47 73;
+  --emerald-400: 52 211 153;
+  --red-300: 252 165 165;
+  --red-400: 248 113 113;
+  --red-500: 239 68 68;
+  --red-900: 127 29 29;
+  --red-950: 69 10 10;
+  --amber-300: 252 211 77;
+  --amber-400: 251 191 36;
+  --orange-300: 253 186 116;
+  --indigo-400: 129 140 248;
+
+  --panel-bg: rgba(17, 24, 39, 0.92);
+  --panel-border: rgba(30, 41, 59, 0.8);
+  --scroll-track: rgba(15, 23, 42, 0.6);
+  --scroll-thumb: #334155;
+  --scroll-hover: rgba(14, 165, 233, 0.8);
+}
+
+.light {
+  color-scheme: light;
+  --page: 241 245 249;
+  --slate-100: 15 23 42;
+  --slate-200: 30 41 59;
+  --slate-300: 51 65 85;
+  --slate-400: 71 85 105;
+  --slate-500: 100 116 139;
+  --slate-700: 148 163 184;
+  --slate-800: 226 232 240;
+  --slate-900: 255 255 255;
+  --sky-300: 7 89 133;
+  --sky-400: 3 105 161;
+  --sky-800: 186 230 253;
+  --sky-950: 224 242 254;
+  --emerald-400: 4 120 87;
+  --red-300: 153 27 27;
+  --red-400: 185 28 28;
+  --red-500: 220 38 38;
+  --red-900: 252 165 165;
+  --red-950: 254 202 202;
+  --amber-300: 146 64 14;
+  --amber-400: 180 83 9;
+  --orange-300: 154 52 18;
+  --indigo-400: 67 56 202;
+
+  --panel-bg: rgba(255, 255, 255, 0.97);
+  --panel-border: #cbd5e1;
+  --scroll-track: #e2e8f0;
+  --scroll-thumb: #94a3b8;
+  --scroll-hover: #0284c7;
+}
+
+html {
+  background: rgb(var(--page));
+}
+
+.glass-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+}
+
+/* Header tabel menempel saat scroll */
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgb(var(--slate-900));
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--scroll-track); }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }

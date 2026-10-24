@@ -1,18 +1,47 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="id" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ATM / CRM Enterprise Incident Command Center - Bank Mandiri</title>
 
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS CDN (versi dipin). Idealnya disimpan lokal di /static untuk produksi -->
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
     <script>
+      const cv = (n) => `rgb(var(--${n}) / <alpha-value>)`;
       tailwind.config = {
         darkMode: "class",
         theme: {
           extend: {
             colors: {
+              page: cv("page"),
+              slate: {
+                100: cv("slate-100"),
+                200: cv("slate-200"),
+                300: cv("slate-300"),
+                400: cv("slate-400"),
+                500: cv("slate-500"),
+                700: cv("slate-700"),
+                800: cv("slate-800"),
+                900: cv("slate-900"),
+              },
+              sky: {
+                300: cv("sky-300"),
+                400: cv("sky-400"),
+                800: cv("sky-800"),
+                950: cv("sky-950"),
+              },
+              emerald: { 400: cv("emerald-400") },
+              red: {
+                300: cv("red-300"),
+                400: cv("red-400"),
+                500: cv("red-500"),
+                900: cv("red-900"),
+                950: cv("red-950"),
+              },
+              amber: { 300: cv("amber-300"), 400: cv("amber-400") },
+              orange: { 300: cv("orange-300") },
+              indigo: { 400: cv("indigo-400") },
               brand: {
                 bg: "#0A0F1D",
                 card: "#111827",
@@ -56,12 +85,12 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@0.469.0"></script>
 
-    <!-- Chart.js for Visual Analytics -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 
-    <!-- Link Custom CSS Eksternal -->
+    <!-- Custom CSS -->
     <link
       rel="stylesheet"
       href="{{ url_for('static', filename='css/style.css') }}"
@@ -69,7 +98,7 @@
   </head>
 
   <body
-    class="bg-[#0A0F1D] text-slate-100 font-sans antialiased min-h-screen transition-colors duration-300 selection:bg-sky-500 selection:text-white dark:bg-[#0A0F1D] dark:text-slate-100 light:bg-slate-100 light:text-slate-900"
+    class="dark bg-bg-page text-slate-100 font-sans antialiased min-h-screen transition-colors duration-300 selection:bg-sky-500 selection:text-white"
     id="appBody"
   >
     <!-- TOP EXECUTIVE BAR -->
@@ -148,14 +177,14 @@
             <button
               onclick="fetchLiveIncidents()"
               title="Force Refresh Data"
-              class="p-2 bg-slate-800 hover:bg-slate-700 active:bg-sky-600 rounded-lg text-slate-300 hover:text-white transition border border-slate-700/80"
+              class="p-2 bg-slate-800 hover:bg-slate-700 active:bg-sky-600 rounded-lg text-slate-300 hover:text-slate-100 transition border border-slate-700/80"
             >
               <i data-lucide="refresh-cw" class="w-4 h-4"></i>
             </button>
             <button
               onclick="exportToCSV()"
               title="Export Incident Report (CSV)"
-              class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition border border-slate-700/80"
+              class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-slate-100 transition border border-slate-700/80"
             >
               <i data-lucide="download" class="w-4 h-4"></i>
             </button>
@@ -181,8 +210,9 @@
 
     <!-- MAIN DASHBOARD BODY -->
     <main class="p-4 lg:p-6 space-y-6 max-w-[1920px] mx-auto">
-      <!-- Section 1: Executive KPI Metrics Grid -->
+      <!-- Section 1: KPI -->
       <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <!-- Active Incidents -->
         <div
           class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-sky-500/50 transition duration-300"
         >
@@ -208,6 +238,7 @@
           <div class="absolute bottom-0 left-0 right-0 h-1 bg-sky-500"></div>
         </div>
 
+        <!-- Impacted Areas -->
         <div
           class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-indigo-500/50 transition duration-300"
         >
@@ -234,31 +265,33 @@
           <div class="absolute bottom-0 left-0 right-0 h-1 bg-indigo-500"></div>
         </div>
 
+        <!-- Avg. Aging (menggantikan Impacted Fleet) -->
         <div
           class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-amber-500/50 transition duration-300"
         >
           <div class="flex items-center justify-between">
             <span
               class="text-xs font-semibold uppercase tracking-wider text-slate-400"
-              >Impacted Fleet</span
+              >Avg. Aging</span
             >
             <span class="p-2 rounded-lg bg-amber-500/10 text-amber-400"
-              ><i data-lucide="cpu" class="w-5 h-5"></i
+              ><i data-lucide="clock" class="w-5 h-5"></i
             ></span>
           </div>
           <div class="mt-2 flex items-baseline justify-between">
             <span
-              id="kpiImpactedMachines"
+              id="kpiAvgAging"
               class="text-3xl font-extrabold font-mono text-slate-100"
-              >0</span
+              >0h 0m</span
             >
           </div>
           <div class="mt-2 text-[11px] text-slate-400">
-            Terminals requiring dispatch
+            Average age of open tickets
           </div>
           <div class="absolute bottom-0 left-0 right-0 h-1 bg-amber-500"></div>
         </div>
 
+        <!-- SLA Breach -->
         <div
           id="criticalSlaCard"
           class="glass-panel p-4 rounded-xl relative overflow-hidden border-2 border-red-600/80"
@@ -266,9 +299,7 @@
           <div class="flex items-center justify-between">
             <span
               class="text-xs font-extrabold uppercase tracking-wider text-red-400 animate-pulse"
-              >SLA BREACH (&gt;4H)</span
-            >
-
+              >SLA BREACH (&gt;1H)</span
             >
             <span class="p-2 rounded-lg bg-red-500/20 text-red-400"
               ><i data-lucide="siren" class="w-5 h-5 animate-bounce"></i
@@ -291,6 +322,7 @@
           <div class="absolute bottom-0 left-0 right-0 h-1 bg-red-600"></div>
         </div>
 
+        <!-- Availability -->
         <div
           class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-emerald-500/50 transition duration-300"
         >
@@ -314,9 +346,12 @@
             >
           </div>
           <div class="mt-2 text-[11px] text-slate-400">
-            Active Issues / Total Fleet:
-            <span id="kpiProblemSub" class="font-mono text-slate-300">0</span> /
-            848
+            Active Issues / Total ATM/CRM:
+            <span id="kpiProblemSub" class="font-mono text-slate-300">0</span>
+            /
+            <span id="kpiTotalMachines" class="font-mono text-slate-300"
+              >848</span
+            >
           </div>
           <div
             class="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500"
@@ -324,8 +359,8 @@
         </div>
       </section>
 
-      <!-- Section 2: Visual Analytics Suite -->
-      <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Section 2: Visual Analytics -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
         <div class="glass-panel p-5 rounded-xl flex flex-col justify-between">
           <div class="flex items-center justify-between mb-4">
             <h3
@@ -346,8 +381,29 @@
             <h3
               class="text-sm font-bold text-slate-200 flex items-center gap-2"
             >
-              <i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i> SLA
-              AGING SEVERITY MATRIX
+              <i data-lucide="truck" class="w-4 h-4 text-indigo-400"></i>
+              INCIDENT DISTRIBUTION BY VENDOR
+            </h3>
+            <span class="text-[10px] font-mono text-slate-400">FLM VENDOR</span>
+          </div>
+          <div class="h-64 w-full overflow-y-auto">
+            <div
+              id="vendorChartWrap"
+              class="relative w-full"
+              style="height: 256px"
+            >
+              <canvas id="chartVendorDistribution"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <h3
+              class="text-sm font-bold text-slate-200 flex items-center gap-2"
+            >
+              <i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i>
+              SLA AGING SEVERITY MATRIX
             </h3>
             <span class="text-[10px] font-mono text-slate-400"
               >AGING BREAKDOWN</span
@@ -367,7 +423,7 @@
               24-HOUR INCIDENT TIMELINE
             </h3>
             <span class="text-[10px] font-mono text-slate-400"
-              >HOURLY VOLUME</span
+              >PEAK PER 15 Min</span
             >
           </div>
           <div class="relative h-64 w-full">
@@ -376,7 +432,63 @@
         </div>
       </section>
 
-      <!-- Section 3: Master Incident Command Data Grid -->
+      <!-- Section 1b: Priority Area Watchlist -->
+      <section
+        id="priorityPanel"
+        class="glass-panel p-5 rounded-xl !border-2 !border-amber-500/50"
+      >
+        <div
+          class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 pb-4 border-b border-slate-800"
+        >
+          <div>
+            <h2
+              class="text-base font-bold text-slate-100 flex items-center gap-2"
+            >
+              <i data-lucide="shield-alert" class="w-4 h-4 text-amber-400"></i>
+              PRIORITY AREA WATCHLIST
+              <span
+                id="priorityCountBadge"
+                class="px-2 py-0.5 text-xs font-mono bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30"
+                >0 Active</span
+              >
+            </h2>
+            <p class="text-xs text-slate-400">Area Palembang</p>
+          </div>
+          <div id="priorityAreaSummary" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <div
+          class="overflow-x-auto rounded-lg border border-slate-800 max-h-[320px] overflow-y-auto"
+        >
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr
+                class="bg-slate-900/90 text-slate-400 text-[11px] uppercase tracking-wider font-mono border-b border-slate-800"
+              >
+                <th class="py-3 text-center px-4 font-semibold">NO</th>
+                <th class="py-3 px-4 font-semibold">TERMINAL ID</th>
+                <th class="py-3 px-4 font-semibold">AREA</th>
+                <th class="py-3 px-4 font-semibold">ERROR TYPE</th>
+                <th class="py-3 px-4 font-semibold">VENDOR FLM</th>
+                <th class="py-3 px-4 font-semibold">AGING</th>
+                <th class="py-3 px-4 font-semibold">STATUS / SLA</th>
+              </tr>
+            </thead>
+            <tbody
+              id="priorityTableBody"
+              class="divide-y divide-slate-800/60 text-xs font-mono"
+            >
+              <tr>
+                <td colspan="7" class="text-center py-6 text-slate-400">
+                  Memuat data area prioritas...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section 3: Master Incident Table -->
       <section class="glass-panel p-5 rounded-xl">
         <div
           class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-800"
@@ -407,6 +519,7 @@
               <input
                 type="text"
                 id="searchInput"
+                aria-label="Cari insiden"
                 oninput="filterIncidents()"
                 placeholder="Search ID, Terminal, Error..."
                 class="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg pl-9 pr-3 py-2 focus:outline-none focus:border-sky-500 w-48 lg:w-64 font-mono placeholder:text-slate-500"
@@ -415,29 +528,29 @@
 
             <select
               id="slaFilter"
+              aria-label="Filter status SLA"
               onchange="filterIncidents()"
               class="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-sky-500 font-mono"
             >
-              <option value="ALL">All SLA Status</option>
-              <option value="CRITICAL">&gt; 4 Hours Critical</option>
-              <option value="WARNING">1 - 4 Hours Warning</option>
-              <option value="NORMAL">&lt; 1 Hour Normal</option>
+              <option value="ALL">Semua Kategori</option>
+              <option value="CRITICAL">&gt; 1 Jam (Merah)</option>
+              <option value="WARNING">30 Menit - 1 Jam (Orange)</option>
+              <option value="NORMAL">&le; 30 Menit (Hijau)</option>
             </select>
           </div>
         </div>
 
         <div
           class="overflow-x-auto rounded-lg border border-slate-800 max-h-[650px] overflow-y-auto"
-          style="will-change: transform"
         >
           <table class="w-full text-left border-collapse">
             <thead>
               <tr
                 class="bg-slate-900/90 text-slate-400 text-[11px] uppercase tracking-wider font-mono border-b border-slate-800"
               >
-                <th class="py-3 px-4 font-semibold">TICKET ID</th>
+                <th class="py-3 text-center px-4 font-semibold">NO</th>
                 <th class="py-3 px-4 font-semibold">TERMINAL ID</th>
-                <th class="py-3 px-4 font-semibold">AREA / KANWIL</th>
+                <th class="py-3 px-4 font-semibold">AREA</th>
                 <th class="py-3 px-4 font-semibold">ERROR TYPE</th>
                 <th class="py-3 px-4 font-semibold">VENDOR FLM</th>
                 <th class="py-3 px-4 font-semibold">AGING</th>
@@ -459,7 +572,6 @@
       </section>
     </main>
 
-    <!-- Link Custom JavaScript Eksternal -->
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
   </body>
 </html>
