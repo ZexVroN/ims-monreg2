@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ATM / CRM Enterprise Incident Command Center - Bank Mandiri</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                bg: "#0A0F1D",
+                card: "#111827",
+                border: "#1E293B",
+                accent: "#38BDF8",
+                emerald: "#10B981",
+                alert: "#EF4444",
+                warning: "#F59E0B",
+                gold: "#EAB308",
+              },
+            },
+            fontFamily: {
+              sans: ["Inter", "system-ui", "sans-serif"],
+              mono: ["JetBrains Mono", "Consolas", "monospace"],
+            },
+            animation: {
+              "pulse-fast": "pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+              "glow-red": "glowRed 1.5s ease-in-out infinite alternate",
+            },
+            keyframes: {
+              glowRed: {
+                "0%": {
+                  boxShadow:
+                    "0 0 5px rgba(239, 68, 68, 0.4), inset 0 0 5px rgba(239, 68, 68, 0.2)",
+                },
+                "100%": {
+                  boxShadow:
+                    "0 0 20px rgba(239, 68, 68, 0.8), inset 0 0 10px rgba(239, 68, 68, 0.4)",
+                },
+              },
+            },
+          },
+        },
+      };
+    </script>
+
+    <!-- Google Fonts & Lucide Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Chart.js for Visual Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Link Custom CSS Eksternal -->
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+  </head>
+
+  <body
+    class="bg-[#0A0F1D] text-slate-100 font-sans antialiased min-h-screen transition-colors duration-300 selection:bg-sky-500 selection:text-white dark:bg-[#0A0F1D] dark:text-slate-100 light:bg-slate-100 light:text-slate-900"
+    id="appBody"
+  >
+    <!-- TOP EXECUTIVE BAR -->
+    <header
+      class="sticky top-0 z-40 w-full glass-panel border-b border-slate-800/80 px-4 py-2.5 shadow-2xl"
+    >
+      <div
+        class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3"
+      >
+        <div class="flex items-center space-x-4">
+          <div class="flex items-center space-x-2.5">
+            <div class="relative flex h-3.5 w-3.5">
+              <span
+                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"
+              ></span>
+              <span
+                class="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"
+              ></span>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span
+                  class="font-bold tracking-wider text-xs uppercase text-sky-400 font-mono"
+                  >E-CHANNEL COMMAND CENTER</span
+                >
+                <span
+                  class="px-1.5 py-0.5 text-[10px] font-semibold bg-sky-950/80 text-sky-300 rounded border border-sky-800/50"
+                  >MANDIRI LIVE API</span
+                >
+              </div>
+              <h1 class="text-sm font-extrabold tracking-tight text-slate-100">
+                ATM / CRM INCIDENT OPERATIONS WALLBOARD
+              </h1>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="flex items-center justify-between lg:justify-end gap-4 flex-wrap"
+        >
+          <div
+            class="flex items-center bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-800"
+          >
+            <div class="text-left mr-3">
+              <div
+                class="text-[10px] text-slate-400 uppercase font-mono tracking-wider"
+              >
+                DATABASE SYNC STATUS
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <span
+                  id="syncStatusText"
+                  class="text-xs font-mono font-bold text-emerald-400"
+                  >CONNECTING...</span
+                >
+                <span class="text-[10px] text-slate-500"
+                  >(LAST: <span id="lastSyncTime">-</span>)</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <div
+            class="bg-slate-900/90 px-3 py-1 rounded-lg border border-slate-800 text-center"
+          >
+            <div class="text-[10px] text-slate-400 font-mono">TIME (WIB)</div>
+            <div
+              id="realtimeClock"
+              class="text-sm font-mono font-bold text-emerald-400"
+            >
+              00:00:00 WIB
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-1.5">
+            <button
+              onclick="fetchLiveIncidents()"
+              title="Force Refresh Data"
+              class="p-2 bg-slate-800 hover:bg-slate-700 active:bg-sky-600 rounded-lg text-slate-300 hover:text-white transition border border-slate-700/80"
+            >
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </button>
+            <button
+              onclick="exportToCSV()"
+              title="Export Incident Report (CSV)"
+              class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition border border-slate-700/80"
+            >
+              <i data-lucide="download" class="w-4 h-4"></i>
+            </button>
+            <button
+              onclick="toggleTheme()"
+              title="Toggle Light/Dark Theme"
+              class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-amber-400 hover:text-amber-300 transition border border-slate-700/80"
+            >
+              <i data-lucide="sun" class="w-4 h-4"></i>
+            </button>
+            <button
+              onclick="toggleFullscreen()"
+              title="Fullscreen Wallboard Mode"
+              class="p-2 bg-sky-600 hover:bg-sky-500 rounded-lg text-white font-medium text-xs transition border border-sky-500 flex items-center gap-1.5"
+            >
+              <i data-lucide="maximize" class="w-3.5 h-3.5"></i>
+              <span class="hidden sm:inline">WALLBOARD</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN DASHBOARD BODY -->
+    <main class="p-4 lg:p-6 space-y-6 max-w-[1920px] mx-auto">
+      <!-- Section 1: Executive KPI Metrics Grid -->
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div
+          class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-sky-500/50 transition duration-300"
+        >
+          <div class="flex items-center justify-between">
+            <span
+              class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+              >Active Incidents</span
+            >
+            <span class="p-2 rounded-lg bg-sky-500/10 text-sky-400"
+              ><i data-lucide="alert-triangle" class="w-5 h-5"></i
+            ></span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span
+              id="kpiTotalIncidents"
+              class="text-3xl font-extrabold font-mono text-slate-100"
+              >0</span
+            >
+          </div>
+          <div class="mt-2 text-[11px] text-slate-400">
+            Total active fault tickets from IMS
+          </div>
+          <div class="absolute bottom-0 left-0 right-0 h-1 bg-sky-500"></div>
+        </div>
+
+        <div
+          class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-indigo-500/50 transition duration-300"
+        >
+          <div class="flex items-center justify-between">
+            <span
+              class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+              >Impacted Areas</span
+            >
+            <span class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400"
+              ><i data-lucide="map-pin" class="w-5 h-5"></i
+            ></span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span
+              id="kpiImpactedAreas"
+              class="text-3xl font-extrabold font-mono text-slate-100"
+              >0</span
+            >
+            <span class="text-xs text-slate-400 font-mono">Reg 2 / Sumsel</span>
+          </div>
+          <div class="mt-2 text-[11px] text-slate-400">
+            Cluster zones affected
+          </div>
+          <div class="absolute bottom-0 left-0 right-0 h-1 bg-indigo-500"></div>
+        </div>
+
+        <div
+          class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-amber-500/50 transition duration-300"
+        >
+          <div class="flex items-center justify-between">
+            <span
+              class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+              >Impacted Fleet</span
+            >
+            <span class="p-2 rounded-lg bg-amber-500/10 text-amber-400"
+              ><i data-lucide="cpu" class="w-5 h-5"></i
+            ></span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span
+              id="kpiImpactedMachines"
+              class="text-3xl font-extrabold font-mono text-slate-100"
+              >0</span
+            >
+          </div>
+          <div class="mt-2 text-[11px] text-slate-400">
+            Terminals requiring dispatch
+          </div>
+          <div class="absolute bottom-0 left-0 right-0 h-1 bg-amber-500"></div>
+        </div>
+
+        <div
+          id="criticalSlaCard"
+          class="glass-panel p-4 rounded-xl relative overflow-hidden border-2 border-red-600/80"
+        >
+          <div class="flex items-center justify-between">
+            <span
+              class="text-xs font-extrabold uppercase tracking-wider text-red-400 animate-pulse"
+              >SLA BREACH (&gt;6H)</span
+            >
+            <span class="p-2 rounded-lg bg-red-500/20 text-red-400"
+              ><i data-lucide="siren" class="w-5 h-5 animate-bounce"></i
+            ></span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span
+              id="kpiCriticalBreaches"
+              class="text-3xl font-black font-mono text-red-500"
+              >0</span
+            >
+            <span
+              class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40"
+              >ACTION REQUIRED</span
+            >
+          </div>
+          <div class="mt-2 text-[11px] text-red-300 font-medium">
+            Critical aging alert active
+          </div>
+          <div class="absolute bottom-0 left-0 right-0 h-1 bg-red-600"></div>
+        </div>
+
+        <div
+          class="glass-panel p-4 rounded-xl relative overflow-hidden group hover:border-emerald-500/50 transition duration-300"
+        >
+          <div class="flex items-center justify-between">
+            <span
+              class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+              >Network Uptime</span
+            >
+            <span class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400"
+              ><i data-lucide="activity" class="w-5 h-5"></i
+            ></span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span class="text-3xl font-extrabold font-mono text-emerald-400"
+              >98.42%</span
+            >
+            <span class="text-xs text-emerald-400 font-mono"
+              >TARGET: 98.00%</span
+            >
+          </div>
+          <div class="mt-2 text-[11px] text-slate-400">
+            E-Channel SLA Benchmark
+          </div>
+          <div
+            class="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500"
+          ></div>
+        </div>
+      </section>
+
+      <!-- Section 2: Visual Analytics Suite -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <h3
+              class="text-sm font-bold text-slate-200 flex items-center gap-2"
+            >
+              <i data-lucide="bar-chart-2" class="w-4 h-4 text-sky-400"></i>
+              INCIDENT DISTRIBUTION BY AREA
+            </h3>
+            <span class="text-[10px] font-mono text-slate-400">LIVE FEED</span>
+          </div>
+          <div class="relative h-64 w-full">
+            <canvas id="chartRegionDistribution"></canvas>
+          </div>
+        </div>
+
+        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <h3
+              class="text-sm font-bold text-slate-200 flex items-center gap-2"
+            >
+              <i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i> SLA
+              AGING SEVERITY MATRIX
+            </h3>
+            <span class="text-[10px] font-mono text-slate-400"
+              >AGING BREAKDOWN</span
+            >
+          </div>
+          <div class="relative h-64 w-full flex items-center justify-center">
+            <canvas id="chartSlaMatrix"></canvas>
+          </div>
+        </div>
+
+        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <h3
+              class="text-sm font-bold text-slate-200 flex items-center gap-2"
+            >
+              <i data-lucide="line-chart" class="w-4 h-4 text-emerald-400"></i>
+              24-HOUR INCIDENT TIMELINE
+            </h3>
+            <span class="text-[10px] font-mono text-slate-400"
+              >HOURLY VOLUME</span
+            >
+          </div>
+          <div class="relative h-64 w-full">
+            <canvas id="chartTimelineTrend"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: Master Incident Command Data Grid -->
+      <section class="glass-panel p-5 rounded-xl">
+        <div
+          class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-800"
+        >
+          <div>
+            <h2
+              class="text-base font-bold text-slate-100 flex items-center gap-2"
+            >
+              MASTER INCIDENT COMMAND TABLE
+              <span
+                id="incidentCountBadge"
+                class="px-2 py-0.5 text-xs font-mono bg-sky-500/20 text-sky-300 rounded-full border border-sky-500/30"
+                >0 Active</span
+              >
+            </h2>
+            <p class="text-xs text-slate-400">
+              Real-time terminal incident telemetry directly from Bank Mandiri
+              IMS
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="relative">
+              <i
+                data-lucide="search"
+                class="w-4 h-4 absolute left-3 top-2.5 text-slate-400"
+              ></i>
+              <input
+                type="text"
+                id="searchInput"
+                oninput="filterIncidents()"
+                placeholder="Search ID, Terminal, Error..."
+                class="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg pl-9 pr-3 py-2 focus:outline-none focus:border-sky-500 w-48 lg:w-64 font-mono placeholder:text-slate-500"
+              />
+            </div>
+
+            <select
+              id="slaFilter"
+              onchange="filterIncidents()"
+              class="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-sky-500 font-mono"
+            >
+              <option value="ALL">All SLA Status</option>
+              <option value="CRITICAL">&gt; 6 Hours Critical</option>
+              <option value="WARNING">2 - 6 Hours Warning</option>
+              <option value="NORMAL">&lt; 2 Hours Normal</option>
+            </select>
+          </div>
+        </div>
+
+        <div
+          class="overflow-x-auto rounded-lg border border-slate-800 max-h-[650px] overflow-y-auto"
+          style="will-change: transform"
+        >
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr
+                class="bg-slate-900/90 text-slate-400 text-[11px] uppercase tracking-wider font-mono border-b border-slate-800"
+              >
+                <th class="py-3 px-4 font-semibold">TICKET ID</th>
+                <th class="py-3 px-4 font-semibold">TERMINAL ID</th>
+                <th class="py-3 px-4 font-semibold">AREA / KANWIL</th>
+                <th class="py-3 px-4 font-semibold">ERROR TYPE</th>
+                <th class="py-3 px-4 font-semibold">VENDOR FLM</th>
+                <th class="py-3 px-4 font-semibold">AGING</th>
+                <th class="py-3 px-4 font-semibold">STATUS / SLA</th>
+              </tr>
+            </thead>
+            <tbody
+              id="incidentTableBody"
+              class="divide-y divide-slate-800/60 text-xs font-mono"
+            >
+              <tr>
+                <td colspan="7" class="text-center py-6 text-slate-400">
+                  Memuat data real-time dari server IMS Mandiri...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- Link Custom JavaScript Eksternal -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+  </body>
+</html>
