@@ -266,7 +266,9 @@
           <div class="flex items-center justify-between">
             <span
               class="text-xs font-extrabold uppercase tracking-wider text-red-400 animate-pulse"
-              >SLA BREACH (&gt;6H)</span
+              >SLA BREACH (&gt;4H)</span
+            >
+
             >
             <span class="p-2 rounded-lg bg-red-500/20 text-red-400"
               ><i data-lucide="siren" class="w-5 h-5 animate-bounce"></i
@@ -295,22 +297,26 @@
           <div class="flex items-center justify-between">
             <span
               class="text-xs font-semibold uppercase tracking-wider text-slate-400"
-              >Network Uptime</span
+              >Availability (Reg 2)</span
             >
             <span class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400"
               ><i data-lucide="activity" class="w-5 h-5"></i
             ></span>
           </div>
           <div class="mt-2 flex items-baseline justify-between">
-            <span class="text-3xl font-extrabold font-mono text-emerald-400"
-              >98.42%</span
+            <span
+              id="kpiAvailability"
+              class="text-3xl font-extrabold font-mono text-emerald-400"
+              >100.00%</span
             >
             <span class="text-xs text-emerald-400 font-mono"
-              >TARGET: 98.00%</span
+              >TARGET: 99.00%</span
             >
           </div>
           <div class="mt-2 text-[11px] text-slate-400">
-            E-Channel SLA Benchmark
+            Active Issues / Total Fleet:
+            <span id="kpiProblemSub" class="font-mono text-slate-300">0</span> /
+            848
           </div>
           <div
             class="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500"
@@ -413,9 +419,9 @@
               class="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-sky-500 font-mono"
             >
               <option value="ALL">All SLA Status</option>
-              <option value="CRITICAL">&gt; 6 Hours Critical</option>
-              <option value="WARNING">2 - 6 Hours Warning</option>
-              <option value="NORMAL">&lt; 2 Hours Normal</option>
+              <option value="CRITICAL">&gt; 4 Hours Critical</option>
+              <option value="WARNING">1 - 4 Hours Warning</option>
+              <option value="NORMAL">&lt; 1 Hour Normal</option>
             </select>
           </div>
         </div>

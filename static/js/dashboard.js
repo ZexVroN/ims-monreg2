@@ -3,6 +3,7 @@
       let chartRegion = null;
       let chartSla = null;
       let chartTrend = null;
+      let currentAvailability = 100.00; // Variabel global baru
 
       window.onload = function () {
         lucide.createIcons();
@@ -36,6 +37,8 @@
 
           if (response.ok && result.data) {
             incidentData = result.data;
+            // Ambil data availability dari backend API
+            currentAvailability = result.availability !== undefined ? result.availability : 100.00;
 
             const now = new Date();
             document.getElementById("lastSyncTime").innerText =
@@ -44,7 +47,7 @@
               "CONNECTED (LIVE)";
 
             updateKPIs();
-            updateCharts(); // Render ulang grafik dengan data baru
+            updateCharts(); 
             renderIncidentTable();
           } else {
             document.getElementById("syncStatusText").innerText = "SYNC ERROR";
@@ -276,6 +279,15 @@
         renderIncidentTable();
       }
 
+      let globalAvailability = 99.00; // Default
+
+      // Di dalam fungsi fetchLiveIncidents(), tangkap availability:
+      // if (response.ok && result.data) {
+      //    incidentData = result.data;
+      //    globalAvailability = result.availability || 100;
+      //    ...
+      // }
+
       function updateKPIs() {
         const total = incidentData.length;
         const criticalBreaches = incidentData.filter(
@@ -286,8 +298,26 @@
         document.getElementById("kpiTotalIncidents").innerText = total;
         document.getElementById("kpiImpactedAreas").innerText = uniqueAreas;
         document.getElementById("kpiImpactedMachines").innerText = total;
-        document.getElementById("kpiCriticalBreaches").innerText =
-          criticalBreaches;
+        document.getElementById("kpiCriticalBreaches").innerText = criticalBreaches;
+
+        // Render nilai total problem secara dinamis di kartu availability
+        const probSubElement = document.getElementById("kpiProblemSub");
+        if (probSubElement) {
+            probSubElement.innerText = total;
+        }
+
+        // Render Availability & Cek Target 99%
+        const availElement = document.getElementById("kpiAvailability");
+        if (availElement) {
+            availElement.innerText = `${currentAvailability}%`;
+            
+            // Jika availability di bawah target 99%, beri peringatan warna merah
+            if (currentAvailability < 99.00) {
+                availElement.className = "text-red-400 font-black animate-pulse";
+            } else {
+                availElement.className = "text-emerald-400 font-black";
+            }
+        }
 
         const card = document.getElementById("criticalSlaCard");
         if (criticalBreaches > 0) {

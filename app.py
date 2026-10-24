@@ -310,17 +310,34 @@ def index():
 
 @app.route("/api/incidents")
 def get_incidents():
-    """Endpoint kilat membaca SQLite lokal."""
+    """Endpoint kilat membaca SQLite lokal + kalkulasi Availability berbasis 848 mesin."""
     try:
         conn = sqlite3.connect(DB_NAME)
         df = pd.read_sql_query("SELECT * FROM incidents", conn)
         conn.close()
 
         result_json = df.to_dict(orient="records")
+        total_problems = len(result_json)
+
+        # Total populasi mesin Region 2
+        TOTAL_REGIONAL_MACHINES = 848
+
+        # Hitung jumlah mesin yang sehat/normal (Total Mesin - Total Problem)
+        # Pastikan tidak minus jika suatu saat data problem melebihi 848
+        healthy_machines = max(0, TOTAL_REGIONAL_MACHINES - total_problems)
+
+        # Kalkulasi Availability yang benar: (Mesin Sehat / Total Mesin) * 100%
+        if TOTAL_REGIONAL_MACHINES > 0:
+            availability_rate = (healthy_machines / TOTAL_REGIONAL_MACHINES) * 100
+        else:
+            availability_rate = 100.00
+
         return jsonify(
             {
                 "source": "LOCAL_SQLITE_CACHE",
-                "count": len(result_json),
+                "count": total_problems,
+                "total_machines": TOTAL_REGIONAL_MACHINES,
+                "availability": round(availability_rate, 2),
                 "data": result_json,
             }
         )
@@ -330,6 +347,8 @@ def get_incidents():
                 {
                     "source": "LOCAL_SQLITE_CACHE",
                     "count": 0,
+                    "total_machines": 848,
+                    "availability": 0.00,
                     "data": [],
                     "message": f"Database belum terisi: {e}",
                 }
