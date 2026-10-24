@@ -203,10 +203,10 @@ def process_ims_data(raw_incidents):
                 aging_hours_list.append(total_jam)
                 aging_minutes_list.append(menit)
 
-                if total_jam >= 6:
+                if total_jam >= 4:
                     status_list.append("CRITICAL")
                     priority_list.append("CRITICAL")
-                elif total_jam >= 2:
+                elif total_jam >= 1:
                     status_list.append("WARNING")
                     priority_list.append("HIGH")
                 else:

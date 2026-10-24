@@ -96,7 +96,7 @@
         chartSla = new Chart(ctxSla, {
           type: "doughnut",
           data: {
-            labels: ["< 2H Normal", "2-6H Warning", "> 6H Critical"],
+            labels: ["< 1H Normal", "1-4H Warning", "> 6H Critical"],
             datasets: [
               {
                 data: [0, 0, 0],
@@ -254,10 +254,10 @@
             : "hover:bg-slate-800/40 transition duration-150";
 
           const slaBadge = isCritical
-            ? `<span class="px-2 py-0.5 text-[10px] bg-red-600 text-white font-black rounded animate-pulse">&gt;6H SLA BREACH</span>`
+            ? `<span class="px-2 py-0.5 text-[10px] bg-red-600 text-white font-black rounded animate-pulse">&gt;4H SLA BREACH</span>`
             : item.Status === "WARNING"
-              ? `<span class="px-2 py-0.5 text-[10px] bg-amber-500/20 text-amber-300 rounded border border-amber-500/40">2H - 6H WARNING</span>`
-              : `<span class="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/40">&lt;2H NORMAL</span>`;
+              ? `<span class="px-2 py-0.5 text-[10px] bg-amber-500/20 text-amber-300 rounded border border-amber-500/40">1H - 4H WARNING</span>`
+              : `<span class="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/40">&lt;1H NORMAL</span>`;
 
           tr.innerHTML = `
           <td class="py-3 px-4 font-bold text-sky-400">#${item.IncidentId || "-"}</td>
