@@ -116,6 +116,22 @@ def init_db():
             warning INTEGER
         )
     """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS resolved_incidents (
+            IncidentId TEXT,
+            ObjectId TEXT,
+            SourceProblemName TEXT,
+            Area TEXT,
+            KANWIL TEXT,
+            FLMVENDOR TEXT,
+            AtmLocation TEXT,
+            CreateTime TEXT,
+            ResolvedAt TEXT,
+            DurationMinutes INTEGER,
+            UNIQUE (IncidentId, ObjectId)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -318,8 +334,58 @@ def process_ims_data(raw_incidents):
     return df[existing_cols]
 
 
+def minutes_since(create_str):
+    """Selisih menit sejak tiket dibuat sampai sekarang (None jika tidak valid)."""
+    dt = pd.to_datetime(create_str, errors="coerce")
+    if pd.isna(dt):
+        return None
+    now_ts = pd.Timestamp.now(tz=dt.tz) if dt.tz is not None else pd.Timestamp.now()
+    return max(0, int((now_ts - dt).total_seconds() // 60))
+
+
+def find_resolved(prev, df_clean):
+    """Mesin yang ada di sync sebelumnya tetapi sudah tidak ada di sync sekarang."""
+    if prev.empty or "ObjectId" not in prev.columns:
+        return []
+
+    # Pengaman: daftar mendadak kosong biasanya karena error/sesi habis,
+    # bukan karena semua insiden selesai bersamaan.
+    if len(df_clean) == 0 and len(prev) >= 10:
+        print("⚠️ [BACKGROUND TASK] Daftar kosong mendadak, pencatatan solved dilewati.")
+        return []
+
+    new_ids = (
+        set(df_clean["ObjectId"].astype(str))
+        if "ObjectId" in df_clean.columns
+        else set()
+    )
+    gone = prev[~prev["ObjectId"].astype(str).isin(new_ids)]
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def val(v):
+        return None if pd.isna(v) else str(v)
+
+    rows = []
+    for r in gone.to_dict(orient="records"):
+        rows.append(
+            (
+                val(r.get("IncidentId")),
+                val(r.get("ObjectId")),
+                val(r.get("SourceProblemName")),
+                val(r.get("Area")),
+                val(r.get("KANWIL")),
+                val(r.get("FLMVENDOR")),
+                val(r.get("AtmLocation")),
+                val(r.get("CreateTime")),
+                now_str,
+                minutes_since(r.get("CreateTime")),
+            )
+        )
+    return rows
+
+
 def save_incidents(df_clean):
-    """Simpan data ke SQLite tanpa jendela 'tabel hilang' + catat snapshot riwayat."""
+    """Simpan data ke SQLite, catat snapshot riwayat, dan catat insiden yang selesai."""
     total = len(df_clean)
     critical = int((df_clean["Status"] == "CRITICAL").sum()) if total else 0
     warning = int((df_clean["Status"] == "WARNING").sum()) if total else 0
@@ -327,8 +393,16 @@ def save_incidents(df_clean):
 
     conn = get_db()
     try:
+        # Baca daftar sebelumnya untuk mendeteksi insiden yang sudah selesai
+        try:
+            prev = pd.read_sql_query("SELECT * FROM incidents", conn)
+        except Exception:
+            prev = pd.DataFrame()
+        resolved_rows = find_resolved(prev, df_clean)
+
         # 1) tulis ke tabel sementara
         df_clean.to_sql("incidents_new", conn, if_exists="replace", index=False)
+
         # 2) tukar tabel dalam satu transaksi
         conn.execute("BEGIN")
         conn.execute("DROP TABLE IF EXISTS incidents")
@@ -342,7 +416,24 @@ def save_incidents(df_clean):
             "DELETE FROM history WHERE ts < datetime('now', 'localtime', ?)",
             (f"-{HISTORY_KEEP_HOURS} hours",),
         )
+        if resolved_rows:
+            conn.executemany(
+                "INSERT OR IGNORE INTO resolved_incidents"
+                " (IncidentId, ObjectId, SourceProblemName, Area, KANWIL, FLMVENDOR,"
+                "  AtmLocation, CreateTime, ResolvedAt, DurationMinutes)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                resolved_rows,
+            )
+        # Riwayat solved disimpan 30 hari
+        conn.execute(
+            "DELETE FROM resolved_incidents"
+            " WHERE ResolvedAt < datetime('now', 'localtime', '-30 days')"
+        )
         conn.commit()
+        if resolved_rows:
+            print(
+                f"✅ [BACKGROUND TASK] {len(resolved_rows)} insiden terdeteksi selesai."
+            )
     except Exception:
         conn.rollback()
         raise
@@ -530,6 +621,33 @@ def get_history():
                 "message": str(e),
             }
         )
+
+
+@app.route("/api/resolved")
+def get_resolved():
+    """Daftar insiden yang sudah selesai (hilang dari daftar aktif IMS)."""
+    try:
+        days = int(request.args.get("days", 1))
+    except ValueError:
+        days = 1
+    days = max(1, min(days, 30))
+
+    try:
+        conn = get_db()
+        df = pd.read_sql_query(
+            "SELECT * FROM resolved_incidents"
+            " WHERE ResolvedAt >= datetime('now', 'localtime', ?)"
+            " ORDER BY ResolvedAt DESC",
+            conn,
+            params=(f"-{days} days",),
+        )
+        conn.close()
+        df = df.astype(object).where(pd.notnull(df), None)
+        return jsonify(
+            {"days": days, "count": len(df), "data": df.to_dict(orient="records")}
+        )
+    except Exception as e:
+        return jsonify({"days": days, "count": 0, "data": [], "message": str(e)})
 
 
 if __name__ == "__main__":

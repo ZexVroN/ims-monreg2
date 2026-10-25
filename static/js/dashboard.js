@@ -1,6 +1,7 @@
 let incidentData = [];
 let chartRegion = null;
 let chartVendor = null;
+let resolvedData = [];
 let chartSla = null;
 let chartTrend = null;
 let currentAvailability = 100.0;
@@ -163,6 +164,7 @@ async function fetchLiveIncidents() {
       renderIncidentTable();
       renderPriorityTable();   // <-- tambah ini
       fetchHistory();
+      fetchResolved();
     } else {
       setSyncStatus("SYNC ERROR", "text-red-400");
     }
@@ -582,6 +584,95 @@ function renderIncidentTable() {
 function filterIncidents() {
   clearTimeout(filterTimer);
   filterTimer = setTimeout(renderIncidentTable, 200);
+}
+
+/* ---------- Solved Incidents ---------- */
+
+function fmtDuration(min) {
+  if (min === null || min === undefined) return "-";
+  const d = Math.floor(min / 1440);
+  const h = Math.floor((min % 1440) / 60);
+  const m = min % 60;
+  return d > 0 ? `${d}d ${pad(h)}h ${pad(m)}m` : `${h}h ${pad(m)}m`;
+}
+
+// Kategori lama penyelesaian: pakai batas yang sama dengan aging
+function durationStatus(min) {
+  if (min === null || min === undefined) return "NORMAL";
+  return min > 60 ? "CRITICAL" : min > 30 ? "WARNING" : "NORMAL";
+}
+
+async function fetchResolved() {
+  const days = document.getElementById("resolvedPeriod").value;
+  try {
+    const response = await fetch(
+      `/api/resolved?days=${encodeURIComponent(days)}`,
+    );
+    const r = await response.json();
+    if (response.ok && Array.isArray(r.data)) {
+      resolvedData = r.data;
+      renderResolvedTable();
+    }
+  } catch (err) {
+    console.error("Gagal mengambil data solved:", err);
+  }
+}
+
+function renderResolvedTable() {
+  const tbody = document.getElementById("resolvedTableBody");
+  if (!tbody) return;
+
+  const q = document.getElementById("resolvedSearch").value.toLowerCase();
+  const items = resolvedData.filter((i) =>
+    [i.ObjectId, i.Area, i.SourceProblemName, i.FLMVENDOR, i.IncidentId]
+      .map((v) => String(v ?? "").toLowerCase())
+      .join(" ")
+      .includes(q),
+  );
+
+  document.getElementById("resolvedCountBadge").innerText =
+    `${items.length} Solved`;
+
+  const withDur = items.filter((i) => typeof i.DurationMinutes === "number");
+  document.getElementById("resolvedAvg").innerText = withDur.length
+    ? fmtDuration(
+        Math.round(
+          withDur.reduce((sum, i) => sum + i.DurationMinutes, 0) /
+            withDur.length,
+        ),
+      )
+    : "-";
+
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400">Belum ada insiden selesai pada periode ini.</td></tr>`;
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  items.forEach((item, index) => {
+    const tr = document.createElement("tr");
+    tr.className = "hover:bg-slate-800/40 transition duration-150";
+
+    const s = String(item.ResolvedAt || "");
+    const doneAt =
+      s.length >= 16
+        ? `${s.slice(8, 10)}/${s.slice(5, 7)} ${s.slice(11, 16)}`
+        : "-";
+
+    tr.innerHTML = `
+      <td data-label="No" class="py-3 px-4 font-bold text-sky-400 text-center">${index + 1}</td>
+      <td data-label="Terminal ID" class="py-3 px-4 text-slate-200 font-semibold">${esc(item.ObjectId)}</td>
+      <td data-label="Area" class="py-3 px-4 text-slate-300">${esc(item.Area)}</td>
+      <td data-label="Error Type" class="py-3 px-4 text-amber-300">${esc(item.SourceProblemName)}</td>
+      <td data-label="Vendor FLM" class="py-3 px-4 text-slate-300">${esc(item.FLMVENDOR)}</td>
+      <td data-label="Selesai" class="py-3 px-4 text-slate-200">${esc(doneAt)}</td>
+      <td data-label="Lama" class="py-3 px-4 text-slate-200">${esc(fmtDuration(item.DurationMinutes))}</td>
+      <td data-label="Kategori" class="py-3 px-4">${slaBadgeHtml(durationStatus(item.DurationMinutes))}</td>
+    `;
+    frag.appendChild(tr);
+  });
+  tbody.innerHTML = "";
+  tbody.appendChild(frag);
 }
 
 /* ---------- KPI ---------- */
