@@ -86,3 +86,84 @@ thead th {
 ::-webkit-scrollbar-track { background: var(--scroll-track); }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
+
+/* ===== MOBILE ===== */
+
+/* Cegah kartu grid melebar karena isi grafik */
+section > * {
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  /* Angka KPI lebih kecil agar muat di kartu setengah layar */
+  #kpiTotalIncidents,
+  #kpiImpactedAreas,
+  #kpiAvgAging,
+  #kpiCriticalBreaches,
+  #kpiAvailability {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+
+  /* Cegah iPhone zoom otomatis saat mengetik */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Tombol header lebih mudah disentuh */
+  header button {
+    padding: 0.65rem;
+  }
+}
+
+/* Tabel menjadi kartu per insiden di layar kecil */
+@media (max-width: 767px) {
+  .responsive-table thead {
+    display: none;
+  }
+
+  .responsive-table,
+  .responsive-table tbody,
+  .responsive-table tr,
+  .responsive-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .responsive-table tr {
+    padding: 10px 12px;
+  }
+
+  .responsive-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 4px 0 !important;
+    text-align: right;
+    word-break: break-word;
+  }
+
+  .responsive-table td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgb(var(--slate-400));
+  }
+
+  /* Baris pesan kosong dan panel aksi tetap satu blok penuh */
+  .responsive-table td[colspan] {
+    display: block;
+    text-align: center;
+    padding: 16px 0 !important;
+  }
+
+  .responsive-table td[colspan]::before {
+    content: none;
+  }
+}

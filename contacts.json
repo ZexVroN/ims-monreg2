@@ -1,0 +1,14 @@
+{
+  "Vendor-ADLPLG":   { "pic": "Mustakim",          "phone": "0815-1365-6999" },
+  "Vendor-PTUGBDL":  { "pic": "Yanuar Yuditama",   "phone": "0895-2818-6515" },
+  "Vendor-PTUGBKTI": { "pic": "Rachmat Kurniawan", "phone": "0822-3732-5884" },
+  "Vendor-PTUGBKU":  { "pic": "Ali Alamsyah",      "phone": "0857-2066-2766" },
+  "Vendor-PTUGJBI":  { "pic": "Husni Ansori",      "phone": "0853-6972-4220" },
+  "Vendor-PTUGMBO":  { "pic": "Rizkie Nanda",      "phone": "0853-8338-9910" },
+  "Vendor-PTUGPDG":  { "pic": "Dasrial",           "phone": "0812-6618-8687" },
+  "Vendor-PTUGPGP":  { "pic": "Prinsip M Sagala",  "phone": "0823-7946-4954" },
+  "Vendor-PTUGPLG":  { "pic": "Yanu",              "phone": "0821-1281-8882" },
+  "Vendor-WIRBDL":   { "pic": "Rudy Malay",        "phone": "0821-8551-661" },
+  "Vendor-WIRPDG":   { "pic": "Oki",               "phone": "0812-7050-7272" },
+  "Vendor-WIRPLG":   { "pic": "Andri Feblita",     "phone": "0815-1990-8478" }
+}

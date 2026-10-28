@@ -1,12 +1,15 @@
 from datetime import datetime
 import hmac
+import json
 import os
+import re
 import sqlite3
 import threading
 import time
+from urllib.parse import quote
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request
 import pandas as pd
 import requests
 from selenium import webdriver
@@ -14,7 +17,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
 
@@ -22,7 +26,12 @@ app = Flask(__name__)
 USERNAME = os.getenv("IMS_USERNAME")
 PASSWORD = os.getenv("IMS_PASSWORD")
 ENV_COOKIE = os.getenv("IMS_COOKIE")
-DB_NAME = "ims_data.db"
+IMS_LOGIN_URL = os.getenv("IMS_LOGIN_URL")
+IMS_DATA_URL = os.getenv("IMS_DATA_URL")  # memakai placeholder {ts} untuk timestamp
+
+# Database & kontak selalu berada di folder yang sama dengan app.py
+DB_NAME = os.path.join(BASE_DIR, "ims_data.db")
+CONTACTS_FILE = os.path.join(BASE_DIR, "contacts.json")  # jangan taruh di folder static
 
 # Opsional: login dasar untuk dashboard (aktif jika keduanya diisi di .env)
 DASH_USER = os.getenv("DASH_USER")
@@ -56,9 +65,49 @@ CACHED_COOKIE = ENV_COOKIE
 LAST_COOKIE_TIME = time.time() if ENV_COOKIE else 0
 COOKIE_EXPIRY_SECONDS = 1800  # 30 menit
 
-# Info sinkronisasi terakhir (dikirim ke frontend)
+# Penanda sinkronisasi terakhir (dipakai scheduler)
 LAST_SYNC = None  # "HH:MM:SS"
 LAST_SYNC_EPOCH = None
+
+
+# ---------------------------------------------------------------------------
+# Kontak WhatsApp vendor (dibaca dari contacts.json, tidak pernah dikirim ke browser)
+# ---------------------------------------------------------------------------
+
+
+def norm_name(s):
+    return re.sub(r"[^a-z0-9]+", " ", str(s or "").lower()).strip()
+
+
+def load_contacts():
+    """Baca contacts.json -> {nama vendor ternormalisasi: nomor}. Nomor tidak valid dilewati."""
+    try:
+        with open(CONTACTS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    contacts = {}
+    for name, val in raw.items():
+        num = val.get("phone") if isinstance(val, dict) else val
+        digits = re.sub(r"\D+", "", str(num or ""))
+        if digits.startswith("0"):
+            digits = "62" + digits[1:]
+        if len(digits) >= 9:
+            contacts[norm_name(name)] = digits
+    return contacts
+
+
+def find_contact(vendor):
+    contacts = load_contacts()
+    return contacts.get(norm_name(vendor)) or contacts.get("default")
+
+
+# ---------------------------------------------------------------------------
+# Auth opsional & database
+# ---------------------------------------------------------------------------
 
 
 @app.before_request
@@ -116,7 +165,6 @@ def init_db():
             warning INTEGER
         )
     """)
-
     conn.execute("""
         CREATE TABLE IF NOT EXISTS resolved_incidents (
             IncidentId TEXT,
@@ -132,8 +180,24 @@ def init_db():
             UNIQUE (IncidentId, ObjectId)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS incident_actions (
+            ObjectId TEXT PRIMARY KEY,
+            IncidentId TEXT,
+            Comment TEXT,
+            Status TEXT,
+            UpdatedAt TEXT,
+            WaTo TEXT,
+            WaAt TEXT
+        )
+    """)
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Login IMS & sinkronisasi data
+# ---------------------------------------------------------------------------
 
 
 def invalidate_cookie():
@@ -150,8 +214,8 @@ def get_ims_cookie():
     if CACHED_COOKIE and (time.time() - LAST_COOKIE_TIME < COOKIE_EXPIRY_SECONDS):
         return CACHED_COOKIE
 
-    # Tanpa username/password, hanya bisa memakai cookie manual dari .env
-    if not USERNAME or not PASSWORD:
+    # Tanpa username/password/alamat login, hanya bisa memakai cookie manual dari .env
+    if not USERNAME or not PASSWORD or not IMS_LOGIN_URL:
         return ENV_COOKIE
 
     print("🌐 [BACKGROUND TASK] Menjalankan Login otomatis Selenium ke IMS...")
@@ -166,9 +230,7 @@ def get_ims_cookie():
         driver = webdriver.Chrome(options=options)
         wait = WebDriverWait(driver, 30)
 
-        driver.get(
-            "https://newatmnet.bankmandiri.co.id/sso/a/login.html?serviceUrl=https://newatmnet.bankmandiri.co.id/IMSClient/?appKey=IMS&applicationName=IMS#/"
-        )
+        driver.get(IMS_LOGIN_URL)
         username_input = wait.until(
             EC.presence_of_element_located((By.NAME, "username"))
         )
@@ -207,7 +269,7 @@ def get_ims_cookie():
         if driver is not None:
             try:
                 print(f"ℹ️ [BACKGROUND TASK] URL terakhir: {driver.current_url}")
-                driver.save_screenshot("login_gagal.png")
+                driver.save_screenshot(os.path.join(BASE_DIR, "login_gagal.png"))
             except Exception:
                 pass
         return ENV_COOKIE
@@ -424,6 +486,11 @@ def save_incidents(df_clean):
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 resolved_rows,
             )
+            # Mesin yang sudah selesai: hapus komentar/status penanganannya
+            conn.executemany(
+                "DELETE FROM incident_actions WHERE ObjectId = ?",
+                [(row[1],) for row in resolved_rows],
+            )
         # Riwayat solved disimpan 30 hari
         conn.execute(
             "DELETE FROM resolved_incidents"
@@ -447,6 +514,10 @@ def fetch_ims_job():
     print("\n🔄 [BACKGROUND TASK] Memulai siklus sinkronisasi data dari IMS...")
 
     try:
+        if not IMS_DATA_URL:
+            print("❌ [BACKGROUND TASK] IMS_DATA_URL belum diisi di .env")
+            return
+
         cookie_str = get_ims_cookie()
         if not cookie_str:
             print(
@@ -455,7 +526,7 @@ def fetch_ims_job():
             return
 
         current_timestamp = int(time.time() * 1000)
-        url = f"https://newatmnet.bankmandiri.co.id/IMSClient/IMS/DxDataGridLoadIncidents?skip=0&take=5000&requireTotalCount=true&sort=%5B%7B%22selector%22%3A%22IncidentId%22%2C%22desc%22%3Atrue%7D%5D&totalSummary=%5B%5D&_={current_timestamp}"
+        url = IMS_DATA_URL.replace("{ts}", str(current_timestamp))
         headers = {
             "Cookie": cookie_str,
             "User-Agent": (
@@ -517,6 +588,11 @@ def start_background_scheduler():
     thread.start()
 
 
+# ---------------------------------------------------------------------------
+# Halaman & API
+# ---------------------------------------------------------------------------
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -542,8 +618,32 @@ def get_incidents():
     synced_at, sync_age = read_last_sync()
     try:
         conn = get_db()
-        df = pd.read_sql_query("SELECT * FROM incidents", conn)
-        conn.close()
+        try:
+            df = pd.read_sql_query(
+                "SELECT i.*, a.Comment AS ActionComment, a.Status AS ActionStatus,"
+                " a.UpdatedAt AS ActionUpdatedAt, a.WaTo AS ActionWaTo,"
+                " a.WaAt AS ActionWaAt"
+                " FROM incidents i LEFT JOIN incident_actions a"
+                " ON a.ObjectId = i.ObjectId",
+                conn,
+            )
+        finally:
+            conn.close()
+
+        # Penanda apakah vendor punya kontak WhatsApp (nomornya TIDAK dikirim ke browser)
+        try:
+            contacts = load_contacts()
+            if "FLMVENDOR" in df.columns:
+                df["WaReady"] = df["FLMVENDOR"].map(
+                    lambda v: bool(
+                        contacts.get(norm_name(v)) or contacts.get("default")
+                    )
+                )
+            else:
+                df["WaReady"] = False
+        except Exception as e:
+            print(f"⚠️ Gagal membaca kontak WhatsApp: {e}")
+            df["WaReady"] = False
 
         # NaN tidak valid di JSON -> ganti None
         df = df.astype(object).where(pd.notnull(df), None)
@@ -568,6 +668,7 @@ def get_incidents():
             }
         )
     except Exception as e:
+        print(f"❌ /api/incidents error: {e}")
         return (
             jsonify(
                 {
@@ -650,8 +751,142 @@ def get_resolved():
         return jsonify({"days": days, "count": 0, "data": [], "message": str(e)})
 
 
+@app.route("/api/actions", methods=["POST"])
+def save_action():
+    """Simpan komentar penanganan; status otomatis menjadi HANDLED (hijau)."""
+    data = request.get_json(silent=True) or {}
+    object_id = str(data.get("object_id") or "").strip()
+    incident_id = str(data.get("incident_id") or "").strip() or None
+    comment = str(data.get("comment") or "").strip()[:1000]
+    send_wa = bool(data.get("send_wa"))
+
+    if not object_id:
+        return jsonify({"ok": False, "message": "Terminal ID kosong"}), 400
+    if not comment:
+        return jsonify({"ok": False, "message": "Komentar belum diisi"}), 400
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT FLMVENDOR FROM incidents WHERE ObjectId = ?", (object_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({"ok": False, "message": "Insiden sudah tidak aktif"}), 404
+
+        vendor = row[0]
+        if send_wa and not find_contact(vendor):
+            return (
+                jsonify(
+                    {"ok": False, "message": "Kontak WhatsApp vendor belum terdaftar"}
+                ),
+                400,
+            )
+
+        # Yang disimpan hanya nama vendor, bukan nomornya
+        wa_to = (vendor or "-") if send_wa else None
+        conn.execute(
+            """
+            INSERT INTO incident_actions
+                (ObjectId, IncidentId, Comment, Status, UpdatedAt, WaTo, WaAt)
+            VALUES (?, ?, ?, 'HANDLED', ?, ?, ?)
+            ON CONFLICT(ObjectId) DO UPDATE SET
+                IncidentId = excluded.IncidentId,
+                Comment = excluded.Comment,
+                Status = 'HANDLED',
+                UpdatedAt = excluded.UpdatedAt,
+                WaTo = COALESCE(excluded.WaTo, incident_actions.WaTo),
+                WaAt = COALESCE(excluded.WaAt, incident_actions.WaAt)
+            """,
+            (
+                object_id,
+                incident_id,
+                comment,
+                now_str,
+                wa_to,
+                now_str if send_wa else None,
+            ),
+        )
+        conn.commit()
+        return jsonify({"ok": True, "updated_at": now_str})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/actions", methods=["DELETE"])
+def delete_action():
+    """Hapus komentar sehingga status kembali BELUM DITANGANI."""
+    data = request.get_json(silent=True) or {}
+    object_id = str(data.get("object_id") or "").strip()
+    if not object_id:
+        return jsonify({"ok": False, "message": "Terminal ID kosong"}), 400
+
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM incident_actions WHERE ObjectId = ?", (object_id,))
+        conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/wa")
+def open_whatsapp():
+    """Susun pesan di server lalu alihkan ke WhatsApp. Nomor tidak ada di kode browser."""
+    object_id = (request.args.get("oid") or "").strip()
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT i.ObjectId, i.IncidentId, i.Area, i.SourceProblemName,"
+            " i.FLMVENDOR, i.AgingStr, a.Comment"
+            " FROM incidents i LEFT JOIN incident_actions a ON a.ObjectId = i.ObjectId"
+            " WHERE i.ObjectId = ?",
+            (object_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row or not row[6]:
+        return "Insiden tidak ditemukan atau komentar belum disimpan.", 404
+
+    phone = find_contact(row[4])
+    if not phone:
+        return "Kontak WhatsApp vendor belum terdaftar.", 404
+
+    text = "\n".join(
+        [
+            "*[IMS Incident]*",
+            f"Terminal: {row[0] or '-'}",
+            f"Incident ID: {row[1] or '-'}",
+            f"Area: {row[2] or '-'}",
+            f"Masalah: {row[3] or '-'}",
+            f"Aging: {row[5] or '-'}",
+            "",
+            f"Komentar: {row[6]}",
+        ]
+    )
+    encoded = quote(text, safe="")
+    ua = request.headers.get("User-Agent", "")
+    if re.search(r"Android|iPhone|iPad|iPod|Mobile", ua, re.I):
+        # HP: buka aplikasi WhatsApp lewat wa.me
+        return redirect(f"https://wa.me/{phone}?text={encoded}")
+    # Komputer: langsung ke WhatsApp Web (melewati halaman pilihan wa.me)
+    return redirect(f"https://web.whatsapp.com/send?phone={phone}&text={encoded}")
+
+
 if __name__ == "__main__":
     init_db()
+    for env_name, env_value in (
+        ("IMS_LOGIN_URL", IMS_LOGIN_URL),
+        ("IMS_DATA_URL", IMS_DATA_URL),
+    ):
+        if not env_value:
+            print(f"⚠️ {env_name} belum diisi di .env")
     start_background_scheduler()
     # Untuk produksi sebaiknya jalankan via waitress/gunicorn, bukan server bawaan Flask.
     app.run(host=os.getenv("HOST", "0.0.0.0"), port=8050, debug=False)

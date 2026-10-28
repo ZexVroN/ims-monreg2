@@ -2,6 +2,8 @@ let incidentData = [];
 let chartRegion = null;
 let chartVendor = null;
 let resolvedData = [];
+let openActionId = null; // Terminal ID yang panel aksinya sedang terbuka
+const actionDrafts = {}; // draft komentar yang belum disimpan
 let chartSla = null;
 let chartTrend = null;
 let currentAvailability = 100.0;
@@ -16,6 +18,7 @@ window.onload = function () {
   applySavedTheme();
   initClocks();
   initCharts();
+  initActionHandlers();
   fetchLiveIncidents();
   setInterval(fetchLiveIncidents, REFRESH_MS);
 };
@@ -159,10 +162,19 @@ async function fetchLiveIncidents() {
         setSyncStatus("CONNECTED (LIVE)", "text-emerald-400");
       }
 
+            // Jika insiden yang sedang dibuka sudah selesai, tutup panelnya
+      if (
+        openActionId &&
+        !incidentData.some((i) => String(i.ObjectId) === openActionId)
+      ) {
+        openActionId = null;
+      }
+
       updateKPIs();
       updateCharts();
-      renderIncidentTable();
-      renderPriorityTable();   // <-- tambah ini
+      // Jangan render ulang tabel saat panel komentar sedang dipakai
+      if (!openActionId) renderIncidentTable();
+      renderPriorityTable();
       fetchHistory();
       fetchResolved();
     } else {
@@ -546,36 +558,47 @@ function renderIncidentTable() {
     `${filtered.length} Active`;
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">Tidak ada insiden yang cocok dengan filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400">Tidak ada insiden yang cocok dengan filter.</td></tr>`;
     return;
   }
 
   const frag = document.createDocumentFragment();
 
   filtered.forEach((item, index) => {
-    const tr = document.createElement("tr");
+    const oid = String(item.ObjectId ?? "");
     const isCritical = item.Status === "CRITICAL";
+    const handled = item.ActionStatus === "HANDLED";
 
+    const tr = document.createElement("tr");
     tr.className = isCritical
       ? "bg-red-950/30 border-l-4 border-l-red-500 hover:bg-red-900/40 transition duration-150"
       : "hover:bg-slate-800/40 transition duration-150";
 
-    const slaBadge = isCritical
-      ? `<span class="px-2 py-0.5 text-[10px] bg-red-600 text-white font-black rounded animate-pulse">Critical</span>`
-      : item.Status === "WARNING"
-        ? `<span class="px-2 py-0.5 text-[10px] bg-orange-500/20 text-orange-300 rounded border border-orange-500/40">Warning</span>`
-        : `<span class="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/40">Normal</span>`;
+    const slaBadge = slaBadgeHtml(item.Status);
+
+    const actionBtn = handled
+      ? `<button data-action="toggle" data-oid="${esc(oid)}" class="px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white whitespace-nowrap">✓ DITANGANI</button>`
+      : `<button data-action="toggle" data-oid="${esc(oid)}" class="px-2.5 py-1 rounded-md text-[10px] font-bold bg-sky-600 hover:bg-sky-500 text-white">AKSI</button>`;
 
     tr.innerHTML = `
-      <td class="py-3 px-4 font-bold text-sky-400 text-center">${index + 1}</td>
-      <td class="py-3 px-4 text-slate-200 font-semibold">${esc(item.ObjectId)}</td>
-      <td class="py-3 px-4 text-slate-300">${esc(item.Area)}</td>
-      <td class="py-3 px-4 text-amber-300">${esc(item.SourceProblemName)}</td>
-      <td class="py-3 px-4 text-slate-300">${esc(item.FLMVENDOR)}</td>
-      <td class="py-3 px-4 text-slate-200 font-mono">${esc(item.AgingStr || "00d 00h 00m")}</td>
-      <td class="py-3 px-4">${slaBadge}</td>
+      <td data-label="No" class="py-3 px-4 font-bold text-sky-400 text-center">${index + 1}</td>
+      <td data-label="Terminal ID" class="py-3 px-4 text-slate-200 font-semibold">${esc(item.ObjectId)}</td>
+      <td data-label="Area" class="py-3 px-4 text-slate-300">${esc(item.Area)}</td>
+      <td data-label="Error Type" class="py-3 px-4 text-amber-300">${esc(item.SourceProblemName)}</td>
+      <td data-label="Vendor FLM" class="py-3 px-4 text-slate-300">${esc(item.FLMVENDOR)}</td>
+      <td data-label="Aging" class="py-3 px-4 text-slate-200 font-mono">${esc(item.AgingStr || "00d 00h 00m")}</td>
+      <td data-label="Status" class="py-3 px-4">${slaBadge}</td>
+      <td data-label="Aksi" class="py-3 px-4">${actionBtn}</td>
     `;
     frag.appendChild(tr);
+
+    // Panel komentar & status di bawah baris yang dibuka
+    if (openActionId === oid) {
+      const detail = document.createElement("tr");
+      detail.dataset.detailFor = oid;
+      detail.innerHTML = `<td colspan="8" class="p-0">${actionPanelHtml(item)}</td>`;
+      frag.appendChild(detail);
+    }
   });
 
   tbody.appendChild(frag);
@@ -584,6 +607,241 @@ function renderIncidentTable() {
 function filterIncidents() {
   clearTimeout(filterTimer);
   filterTimer = setTimeout(renderIncidentTable, 200);
+}
+
+/* ---------- Aksi: komentar, status, WhatsApp ---------- */
+
+// Kontak WhatsApp per vendor FLM.
+// Nama vendor harus sama dengan kolom VENDOR FLM (huruf besar/kecil tidak masalah).
+// Nomor format 62xxxxxxxxxx (tanpa tanda + dan tanpa 0 di depan).
+
+function actionInfoText(item) {
+  function buildWaText(item, comment) {
+  return [
+    "*[IMS Incident]*",
+    `Terminal: ${item?.ObjectId ?? "-"}`,
+    `Incident ID: ${item?.IncidentId ?? "-"}`,
+    `Area: ${item?.Area ?? "-"}`,
+    `Masalah: ${item?.SourceProblemName ?? "-"}`,
+    `Aging: ${item?.AgingStr ?? "-"}`,
+    "",
+    `Komentar: ${comment}`,
+  ].join("\n");
+}
+
+function copyText(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (e) {
+    ok = false;
+  }
+  document.body.removeChild(ta);
+  if (!ok && navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).catch(() => {});
+    ok = true;
+  }
+  return ok;
+}
+  const parts = [];
+  if (item.ActionUpdatedAt)
+    parts.push(`Diperbarui: ${esc(String(item.ActionUpdatedAt).slice(5, 16))}`);
+  if (item.ActionWaAt)
+    parts.push(
+      `WhatsApp dibuka ke ${esc(item.ActionWaTo)} (${esc(String(item.ActionWaAt).slice(5, 16))})`,
+    );
+  return parts.join(" · ");
+}
+
+function actionPanelHtml(item) {
+  const oid = String(item.ObjectId ?? "");
+  const handled = item.ActionStatus === "HANDLED";
+  const draft =
+    actionDrafts[oid] !== undefined ? actionDrafts[oid] : item.ActionComment || "";
+  const waReady = item.WaReady === true;
+
+  const statusBadge = handled
+    ? `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">SUDAH DITANGANI</span>`
+    : `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-red-500/20 text-red-400 border border-red-500/40">BELUM DITANGANI</span>`;
+
+  const waInfo = waReady
+    ? `<span class="text-emerald-400">Kontak WhatsApp vendor: terdaftar</span>`
+    : `<span class="text-amber-300">Kontak WhatsApp vendor belum terdaftar (isi di contacts.json)</span>`;
+
+  const btn = "px-3 py-1.5 rounded-md text-[11px] font-bold transition";
+  const sendCls = waReady
+    ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+    : "bg-slate-800 text-slate-500 border border-slate-700 opacity-60 cursor-not-allowed";
+
+  return `
+    <div class="text-left p-3 m-2 rounded-lg bg-slate-900/70 border border-slate-800 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="text-xs text-slate-300 font-mono">TINDAKAN · ${esc(oid)} · ${esc(item.FLMVENDOR)}</div>
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] text-slate-400 font-mono">STATUS</span>${statusBadge}
+        </div>
+      </div>
+
+      <textarea data-role="comment" data-oid="${esc(oid)}" rows="3" maxlength="1000"
+        placeholder="Tulis komentar / instruksi untuk vendor..."
+        class="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg p-2 focus:outline-none focus:border-sky-500 font-mono placeholder:text-slate-500">${esc(draft)}</textarea>
+
+      <div class="text-[11px] font-mono">${waInfo}</div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button data-action="save" data-oid="${esc(oid)}" class="${btn} bg-sky-600 hover:bg-sky-500 text-white">SIMPAN</button>
+        <button data-action="send" data-oid="${esc(oid)}" ${waReady ? "" : "disabled"} class="${btn} ${sendCls}">SIMPAN &amp; KIRIM WHATSAPP</button>
+        ${handled ? `<button data-action="clear" data-oid="${esc(oid)}" class="${btn} bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">HAPUS KOMENTAR</button>` : ""}
+        <button data-action="close" data-oid="${esc(oid)}" class="${btn} bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">TUTUP</button>
+      </div>
+
+      <div data-role="msg" class="text-[11px] text-slate-400 font-mono min-h-[1rem]">${actionInfoText(item)}</div>
+    </div>
+  `;
+}
+
+function findDetailRow(oid) {
+  return [
+    ...document.querySelectorAll("#incidentTableBody tr[data-detail-for]"),
+  ].find((tr) => tr.dataset.detailFor === oid);
+}
+
+function setPanelMsg(oid, html, isError) {
+  const row = findDetailRow(oid);
+  const el = row && row.querySelector('[data-role="msg"]');
+  if (!el) return;
+  el.innerHTML = html;
+  el.classList.toggle("text-red-400", !!isError);
+  el.classList.toggle("text-slate-400", !isError);
+}
+
+function initActionHandlers() {
+  const tbody = document.getElementById("incidentTableBody");
+
+  tbody.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn || btn.disabled) return;
+    const oid = btn.dataset.oid;
+
+    switch (btn.dataset.action) {
+      case "toggle":
+        openActionId = openActionId === oid ? null : oid;
+        renderIncidentTable();
+        break;
+      case "close":
+        openActionId = null;
+        renderIncidentTable();
+        break;
+      case "save":
+        submitAction(oid, false);
+        break;
+      case "send":
+        submitAction(oid, true);
+        break;
+      case "clear":
+        clearAction(oid);
+        break;
+    }
+  });
+
+  // Simpan draft komentar supaya tidak hilang saat tabel di-render ulang
+  tbody.addEventListener("input", (e) => {
+    if (e.target.matches('textarea[data-role="comment"]')) {
+      actionDrafts[e.target.dataset.oid] = e.target.value;
+    }
+  });
+}
+
+async function submitAction(oid, sendWa) {
+  const item = incidentData.find((i) => String(i.ObjectId) === oid);
+  const row = findDetailRow(oid);
+  if (!item || !row) return;
+
+  const comment = row.querySelector('[data-role="comment"]').value.trim();
+  if (!comment) return setPanelMsg(oid, "Komentar belum diisi.", true);
+
+  // Buka tab dulu saat tombol diklik supaya tidak diblokir browser
+  const waWin = sendWa ? window.open("about:blank", "_blank") : null;
+  setPanelMsg(oid, "Menyimpan...", false);
+
+  try {
+    const res = await fetch("/api/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        object_id: oid,
+        incident_id: item.IncidentId ?? null,
+        comment,
+        send_wa: sendWa,
+      }),
+    });
+    const r = await res.json();
+    if (!res.ok || !r.ok) throw new Error(r.message || "Gagal menyimpan");
+
+    item.ActionComment = comment;
+    item.ActionStatus = "HANDLED";
+    item.ActionUpdatedAt = r.updated_at;
+    if (sendWa) {
+      item.ActionWaTo = item.FLMVENDOR;
+      item.ActionWaAt = r.updated_at;
+    }
+    delete actionDrafts[oid];
+    renderIncidentTable();
+
+    if (sendWa) {
+      const url = `/api/wa?oid=${encodeURIComponent(oid)}`;
+      if (waWin) {
+        waWin.location.href = url;
+      } else {
+        setPanelMsg(
+          oid,
+          `Tersimpan. Pop-up diblokir, <a href="${esc(url)}" target="_blank" rel="noopener" class="text-sky-400 underline">klik di sini untuk membuka WhatsApp</a>.`,
+          false,
+        );
+      }
+    } else {
+      setPanelMsg(oid, "Tersimpan.", false);
+    }
+  } catch (err) {
+    if (waWin) waWin.close();
+    setPanelMsg(oid, `Gagal: ${esc(err.message)}`, true);
+  }
+}
+
+async function clearAction(oid) {
+  const item = incidentData.find((i) => String(i.ObjectId) === oid);
+  if (!item) return;
+  if (!confirm("Hapus komentar dan kembalikan status ke BELUM DITANGANI?")) return;
+
+  try {
+    const res = await fetch("/api/actions", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ object_id: oid }),
+    });
+    const r = await res.json();
+    if (!res.ok || !r.ok) throw new Error(r.message || "Gagal menghapus");
+
+    [
+      "ActionComment",
+      "ActionStatus",
+      "ActionUpdatedAt",
+      "ActionWaTo",
+      "ActionWaAt",
+    ].forEach((k) => {
+      item[k] = null;
+    });
+    delete actionDrafts[oid];
+    renderIncidentTable();
+  } catch (err) {
+    setPanelMsg(oid, `Gagal: ${esc(err.message)}`, true);
+  }
 }
 
 /* ---------- Solved Incidents ---------- */

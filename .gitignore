@@ -3,9 +3,20 @@
 
 # Abaikan database lokal cache
 *.db
+*.db-wal
+*.db-shm
+login_gagal.png
 
 # Abaikan cache Python & file sistem OS
 __pycache__/
 *.pyc
+.DS_Store
+Thumbs.db
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
